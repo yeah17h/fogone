@@ -4,3 +4,4 @@ node_modules/
 .pw-profile/
 reports/
 .DS_Store
+.claude/settings.local.json
