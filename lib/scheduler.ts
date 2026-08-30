@@ -8,6 +8,7 @@ import {
 } from './segmenter';
 import { ensureStyle, fail, fill, mountPlaceholder } from './renderer';
 import { cacheKey, translationCache } from './cache';
+import { emptySiteStats, pickSite, type SiteHost, type SiteModule, type SiteStats } from './sites';
 
 const CONCURRENCY = 3;
 
@@ -46,6 +47,8 @@ export interface SessionStats {
   cacheHits: number;
   /** 快取目前存了幾筆（跨 Session，關掉再打開不會歸零） */
   cacheSize: number;
+  /** 站點模組的統計（M2）。沒有模組時 id 為 null，其餘欄位維持 0。 */
+  site: SiteStats;
 }
 
 /** 備援語言判斷：偵測器不可用時的粗規則（有假名→ja；拉丁字母為主→en） */
@@ -66,6 +69,7 @@ export class Session {
   private running = 0;
   private detector: Promise<YiLanguageDetector> | null = null;
   private stopped = false;
+  private site: SiteModule | null = null;
 
   readonly stats: SessionStats = {
     found: 0, queued: 0, done: 0, failed: 0,
@@ -77,6 +81,7 @@ export class Session {
     engineCalls: 0,
     cacheHits: 0,
     cacheSize: 0,
+    site: emptySiteStats(),
   };
 
   constructor(private doc: Document) {
@@ -117,14 +122,41 @@ export class Session {
     // 但只在啟動時發生一次，換來 start 與 observe 共用同一條收集路徑。
     const initial = this.observe(this.doc.body);
     this.mo.observe(this.doc.body, { childList: true, subtree: true });
+
+    // 站點模組（M2）：有就掛上，沒有就算了。通用管線照跑，不因為有模組而改變行為。
+    this.site = pickSite(this.doc.defaultView?.location.href ?? '');
+    this.site?.start(this.siteHost());
+
     return initial;
   }
 
   stop() {
     this.stopped = true;
+    this.site?.stop();
+    this.site = null;
     this.io.disconnect();
     this.mo.disconnect();
     this.queue.length = 0;
+  }
+
+  /** 交給站點模組的能力面：只有「翻這段文字」和一個放統計的地方 */
+  private siteHost(): SiteHost {
+    return {
+      doc: this.doc,
+      siteStats: this.stats.site,
+      translate: async (text: string) => {
+        const r = await this.translateText(text);
+        // 分開記，才分得出「字幕打了幾次引擎」與「整頁打了幾次」。
+        // 失敗（reason === 'error'）也是打過引擎的，成本上要算，不然統計會少報。
+        if (r.ok) {
+          if (r.fromCache) this.stats.site.cueCacheHits++;
+          else this.stats.site.cueEngineCalls++;
+        } else if (r.reason === 'error') {
+          this.stats.site.cueEngineCalls++;
+        }
+        return r.ok ? r.text : null;
+      },
+    };
   }
 
   /** 收集 root 下的翻譯單位，交給 IntersectionObserver 盯；回傳找到幾個 */
@@ -189,26 +221,31 @@ export class Session {
     return guessSource(text);
   }
 
-  private async translateUnit(unit: HTMLElement) {
-    const text = unitText(unit);
-    if (!text || looksChinese(text)) { this.stats.skippedChinese++; return; }
+  /**
+   * 文字層級的翻譯管線：中文判斷 → 語言偵測 → 快取 → 語言包 → 引擎。
+   * DOM 單位（translateUnit）與站點模組（字幕）共用這一條，
+   * 所以快取、統計、鐵律 7 的語言包檢查只有一份實作。
+   *
+   * onEngineStart 在「確定要打引擎、而且不是快取命中」的那一刻呼叫，
+   * 讓呼叫端有機會先掛上載入中的佔位符；快取命中不會呼叫它（沒有等待可言）。
+   */
+  private async translateText(
+    text: string,
+    onEngineStart?: () => void,
+  ): Promise<{ ok: true; text: string; fromCache: boolean } | { ok: false; reason: string }> {
+    if (!text || looksChinese(text)) { this.stats.skippedChinese++; return { ok: false, reason: 'chinese' }; }
 
     const source = await this.detectSource(text);
-    if (this.stopped) return; // 偵測期間使用者可能已按下關閉，別再往下掛節點
-    if (!source) { this.stats.skippedDetect++; return; } // 非 en/ja：MVP 先跳過
+    if (this.stopped) return { ok: false, reason: 'stopped' };
+    if (!source) { this.stats.skippedDetect++; return { ok: false, reason: 'detect' }; }
 
-    // 快取查詢排在語言包檢查「之前」（#10）：手上已經有譯文就根本不需要引擎，
-    // 語言包在不在也就不重要了。順帶讓虛擬化站捲回時能立刻補上譯文。
+    // 快取查詢排在語言包檢查「之前」（#10）：手上已經有譯文就根本不需要引擎。
     const key = cacheKey(this.engine.id, source, TARGET, text);
     const cached = translationCache.get(key);
     if (cached !== undefined) {
-      if (this.stopped) return; // unmountAll 可能已經跑過，這時掛上去就成了孤兒節點
-      const node = mountPlaceholder(unit);
-      fill(node, cached); // 同步接上，不會閃一下佔位符
       this.stats.cacheHits++;
-      this.stats.done++;
       this.stats.cacheSize = translationCache.size;
-      return;
+      return { ok: true, text: cached, fromCache: true };
     }
 
     // 鐵律 7：content script 不觸發下載。語言包還沒好就跳過，由 popup 引導使用者啟用。
@@ -220,10 +257,10 @@ export class Session {
       avail = 'error';
     }
     this.stats.availability[`${source}→${TARGET}`] = avail;
-    if (this.stopped) return;  // availability() 也是 await，同樣要重新確認
-    if (avail !== 'available') { this.stats.skippedPack++; return; }
+    if (this.stopped) return { ok: false, reason: 'stopped' };
+    if (avail !== 'available') { this.stats.skippedPack++; return { ok: false, reason: 'pack' }; }
 
-    const node = mountPlaceholder(unit);
+    onEngineStart?.();
     try {
       this.stats.engineCalls++;
       const translation = await this.engine.translate({
@@ -231,14 +268,29 @@ export class Session {
         sourceLanguage: source,
         targetLanguage: TARGET,
       });
-      if (this.stopped) { node.remove(); return; }
-      fill(node, translation);
       translationCache.set(key, translation);
-      this.stats.done++;
       this.stats.cacheSize = translationCache.size;
+      if (this.stopped) return { ok: false, reason: 'stopped' };
+      return { ok: true, text: translation, fromCache: false };
     } catch {
-      fail(node);
       this.stats.failed++;
+      return { ok: false, reason: 'error' };
     }
+  }
+
+  private async translateUnit(unit: HTMLElement) {
+    const text = unitText(unit);
+    // 用物件裝而不是區域變數：TypeScript 的控制流分析會假設 callback 不執行，
+    // 把區域變數收窄成 never，之後就不能再當節點用了。
+    const held: { node: HTMLElement | null } = { node: null };
+
+    const r = await this.translateText(text, () => { held.node = mountPlaceholder(unit); });
+    if (!r.ok) { if (held.node) fail(held.node); return; }
+    if (this.stopped) { held.node?.remove(); return; }
+
+    // 快取命中時上面不會掛佔位符，這裡補掛再同步填字，畫面不會閃
+    const node = held.node ?? mountPlaceholder(unit);
+    fill(node, r.text);
+    this.stats.done++;
   }
 }

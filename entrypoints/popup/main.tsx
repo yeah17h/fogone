@@ -86,6 +86,12 @@ function App() {
               `引擎呼叫 ${s.engineCalls ?? 0}、快取命中 ${s.cacheHits ?? 0}（存 ${s.cacheSize ?? 0} 筆）。` +
               (packs ? `語言包：${packs}。` : '') +
               // 分段策略（#2）：零遙測沒有遠端 log，診斷資訊只能放在使用者看得到的地方
+              // 字幕模式（M2）：只有站點模組跑起來時才顯示，其他頁面不佔版面
+              (s.site?.id
+                ? `字幕（${s.site.id}）：翻譯 ${s.site.cueTranslated}、丟棄 ${s.site.cueDropped}`
+                  + `、已是中文 ${s.site.cueSkippedChinese}（觀察 ${s.site.cueSeen}）；`
+                  + `字幕引擎呼叫 ${s.site.cueEngineCalls}、快取命中 ${s.site.cueCacheHits}。`
+                : '') +
               (s.mode === 'dense'
                 ? `分段：密度備援（標準選擇器不夠用，備援多撈 ${s.fallbackFound} 個）。`
                 : '分段：標準。') +
