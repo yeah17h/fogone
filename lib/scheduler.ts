@@ -2,7 +2,10 @@
 // PRD §6 效能鐵律的實作核心：先翻看得到的，看不到的等捲到再翻。
 
 import { LocalEngine, SUPPORTED_SOURCES, TARGET } from './engine';
-import { collectUnits, KANA, looksChinese, unitText } from './segmenter';
+import {
+  collectDenseUnits, collectStandardUnits, KANA, looksChinese,
+  SEGMENT_TUNING, unitText, type SegmentMode,
+} from './segmenter';
 import { ensureStyle, fail, fill, mountPlaceholder } from './renderer';
 
 const CONCURRENCY = 3;
@@ -23,6 +26,14 @@ export interface SessionStats {
    * 該引導使用者去 popup 啟用、還是叫他等一下。純字串物件，可結構化複製傳給 popup。
    */
   availability: Record<string, string>;
+  /**
+   * 這次 session 用的分段策略（#2）：'standard' = 標準選擇器夠用；
+   * 'dense' = 標準選擇器命中太少，已啟動文字密度備援。
+   * 零遙測產品沒有遠端 log，診斷只能做在使用者自己看得到的地方（popup 統計列）。
+   */
+  mode: SegmentMode;
+  /** 密度備援比標準選擇器多撈到幾個單位（mode === 'standard' 時恆為 0） */
+  fallbackFound: number;
 }
 
 /** 備援語言判斷：偵測器不可用時的粗規則（有假名→ja；拉丁字母為主→en） */
@@ -49,6 +60,8 @@ export class Session {
     skippedChinese: 0, skippedDetect: 0, skippedPack: 0,
     detectorBroken: false,
     availability: {},
+    mode: 'standard',
+    fallbackFound: 0,
   };
 
   constructor(private doc: Document) {
@@ -74,6 +87,16 @@ export class Session {
   }
 
   start(): number {
+    // 分段策略只在這裡決定一次，整個 session 沿用（#2）。
+    // 不能交給每次 mutation 各自判斷：單一新增節點的標準命中數本來就趨近 0，
+    // 那樣每個 mutation 都會誤觸備援，等於備援永遠開著。
+    const probe = collectStandardUnits(this.doc.body);
+    if (probe.length <= SEGMENT_TUNING.TRIGGER_MAX_STANDARD_UNITS) {
+      this.stats.mode = 'dense';
+    }
+
+    // 策略定了才正式收。standard 模式下這裡會重跑一次剛才的掃描，
+    // 但只在啟動時發生一次，換來 start 與 observe 共用同一條收集路徑。
     const initial = this.observe(this.doc.body);
     this.mo.observe(this.doc.body, { childList: true, subtree: true });
     return initial;
@@ -88,7 +111,18 @@ export class Session {
 
   /** 收集 root 下的翻譯單位，交給 IntersectionObserver 盯；回傳找到幾個 */
   private observe(root: ParentNode): number {
-    const units = collectUnits(root);
+    const units = collectStandardUnits(root);
+    if (this.stats.mode === 'dense') {
+      // 累加而不是覆寫：捲動時每批新內容都會再走一次備援，統計要反映總量
+      const dense = collectDenseUnits(root);
+      this.stats.fallbackFound += dense.length;
+      units.push(...dense);
+    }
+    return this.track(units);
+  }
+
+  /** 把已收集好的單位交給 IntersectionObserver 盯；回傳幾個 */
+  private track(units: HTMLElement[]): number {
     for (const unit of units) {
       this.io.observe(unit);
     }

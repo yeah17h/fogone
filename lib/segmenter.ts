@@ -27,6 +27,51 @@ const PAGE_CHROME = [
 /** 內文容器：<header>/<footer> 落在這裡面時是文章自己的標題區／註腳，算內文 */
 const MAIN_CONTENT = 'main,[role=main],article,[role=article]';
 
+/**
+ * 密度備援掃描的候選標籤（#2）。Threads 這類站把貼文全用 div/span 疊出來，
+ * 標準選擇器一個都抓不到，只能從這些泛用容器裡挑出「自己就是一塊文字」的葉層。
+ */
+const DENSE_CANDIDATE = 'div,span,article,section';
+
+/** 分段策略：standard = 標準選擇器；dense = 加上文字密度備援（#2 的兩段式） */
+export type SegmentMode = 'standard' | 'dense';
+
+/**
+ * 兩段式分段的四個門檻（#2）。這些是經驗值不是原理值，改之前先重跑
+ * Threads 搜尋頁與 BBC／MDN／Zenn，確認「該啟動的啟動、不該啟動的不啟動」。
+ *
+ * 實測依據（2026-08-30，未登入）：
+ *
+ *   站          標準選擇器命中   密度命中(葉層)   有無 <article>
+ *   BBC             93              —              1
+ *   MDN             63              —              0（但 main 齊全）
+ *   Zenn            35              —              2
+ *   Threads 搜尋     6              23              0
+ *   Threads 首頁     5              63              0
+ *
+ * TRIGGER_MAX_STANDARD_UNITS = 12：取在 Threads(5~6) 與 Zenn(35) 中間，
+ *   離兩邊都有兩三倍餘裕。這道閘門同時是 #1 的保險——BBC/MDN 永遠走不到備援路徑，
+ *   外框排除不可能被新策略破壞。
+ *
+ * MIN_DIRECT_TEXT_LENGTH = 12 與 MIN_WORDS = 2 是互補的兩道閘門，各殺一種雜訊：
+ *   長度殺時間戳（「6小時」「12小時」長度 ≤ 3）；
+ *   詞數殺帳號名與標籤（「scimath_77」「hrswatigupta_official」「github」都是單一 token）。
+ *   實測長度門檻單獨用要拉到 20 才乾淨（搜尋頁只剩 8 個），
+ *   但配上詞數閘門後 12 就夠乾淨，且保住 17 個候選——召回率高一倍。
+ *
+ * MIN_DIRECT_TEXT_RATIO = 0.5：確認這一層真的是「文字葉」而不是把文字放在子孫的容器。
+ */
+export const SEGMENT_TUNING = {
+  /** 標準選擇器命中數 ≤ 此值才啟動密度備援 */
+  TRIGGER_MAX_STANDARD_UNITS: 12,
+  /** 備援單位「自己的」文字最小長度 */
+  MIN_DIRECT_TEXT_LENGTH: 12,
+  /** 備援單位最少詞數（CJK 一字一詞，見 wordCount） */
+  MIN_WORDS: 2,
+  /** 自身直接文字佔全部文字的比例下限 */
+  MIN_DIRECT_TEXT_RATIO: 0.5,
+} as const;
+
 export const DONE_ATTR = 'data-yi-done';
 
 /**
@@ -103,29 +148,50 @@ function inPageChrome(el: Element): boolean {
 function isLinkLabel(el: HTMLElement): boolean {
   const text = (el.textContent ?? '').trim();
   if (!text) return false;
-  const linkText = Array.from(el.querySelectorAll('a'), (a) => a.textContent ?? '').join('').trim();
-  if (!linkText) return false;
-  if (linkText.length / text.length < 0.9) return false;
+
+  // 單位「自己就在 <a> 裡面」時整塊都是連結文字，不必再算佔比。
+  // Threads 搜尋頁的關鍵字是 <a><h1>javascript</h1></a>，只看子孫連結會漏掉它（翻成「爪哇」）。
+  // 但這條只在單位不在內文容器裡時才成立——<article><a><h1>War ends</h1></a></article>
+  // 這種「整條包在連結裡的短標題」是真內文，光憑「在連結裡＋≤2 詞」不足以判它是 UI。
+  const wholeUnitIsLink = !!el.closest('a') && !el.closest(MAIN_CONTENT);
+  if (!wholeUnitIsLink) {
+    const linkText = Array.from(el.querySelectorAll('a'), (a) => a.textContent ?? '').join('').trim();
+    if (!linkText) return false;
+    if (linkText.length / text.length < 0.9) return false;
+  }
+  // 詞數閘門仍是最後一道：整條包在 <a> 裡的新聞標題詞數遠超過 2，不會被誤殺
   return wordCount(text) <= 2;
 }
 
 /**
- * 收集 root 底下的翻譯單位（含 root 自身）。
- * 規則：符合 UNIT_SELECTOR、不在 SKIP_CLOSEST 裡、還沒翻過、
- * 且自身不包含其他翻譯單位（避免外層 <li> 和內層 <p> 重複翻）、
- * 不在頁面外框裡、不是純連結短標籤。
- *
+ * root 自身 ＋ 子孫中符合 selector 的元素。
  * root 自身一定要納入：MutationObserver 是把「新增的那個節點」直接傳進來的，
  * 而 querySelectorAll 只找子孫。SPA 直接 append 一個 <p>（Threads 貼文、無限捲動
- * 都是這個形狀）時，那個 <p> 永遠不會被收集——只有外面多包一層容器才會中。
+ * 都是這個形狀）時，那個節點永遠不會被收集——只有外面多包一層容器才會中。
  */
-export function collectUnits(root: ParentNode): HTMLElement[] {
-  const self = root instanceof HTMLElement && root.matches(UNIT_SELECTOR) ? [root] : [];
-  const candidates = [...self, ...root.querySelectorAll<HTMLElement>(UNIT_SELECTOR)];
+function selfAndDescendants(root: ParentNode, selector: string): HTMLElement[] {
+  const self = root instanceof HTMLElement && root.matches(selector) ? [root] : [];
+  return [...self, ...root.querySelectorAll<HTMLElement>(selector)];
+}
+
+/** 這一層「自己的」文字：只算直接子文字節點，不含子孫。密度啟發式的核心量測。 */
+function directText(el: Element): string {
+  let s = '';
+  for (const n of el.childNodes) {
+    if (n.nodeType === Node.TEXT_NODE) s += n.nodeValue ?? '';
+  }
+  return s;
+}
+
+/** 標準選擇器的單位 */
+export function collectStandardUnits(root: ParentNode): HTMLElement[] {
   const units: HTMLElement[] = [];
-  for (const el of candidates) {
+  for (const el of selfAndDescendants(root, UNIT_SELECTOR)) {
     if (el.closest(SKIP_CLOSEST)) continue;
     if (el.hasAttribute(DONE_ATTR)) continue;
+    // 子孫裡已經有譯文＝這塊翻過了。不擋的話 textContent 會把譯文一起算進去，
+    // 於是「翻譯的譯文」會被當成原文再翻一次（SPA 把已翻節點搬到新容器下就會發生）。
+    if (el.querySelector('x-yi')) continue;
     if (el.querySelector(UNIT_SELECTOR)) continue; // 讓最內層的單位去翻
     if (!hasEnoughText(el)) continue;
     if (inPageChrome(el)) continue;
@@ -135,7 +201,63 @@ export function collectUnits(root: ParentNode): HTMLElement[] {
   return units;
 }
 
-/** 取要送翻的文字（MVP：純文字。行內格式的保留是之後 LLM 引擎的事） */
+/**
+ * 密度備援（#2）：從 div/span 裡挑出「自己就是一塊文字」的葉層當單位。
+ * 只在標準選擇器抓不到東西時才會被呼叫（見 SEGMENT_TUNING 的觸發門檻）。
+ */
+export function collectDenseUnits(root: ParentNode): HTMLElement[] {
+  const hits: HTMLElement[] = [];
+  for (const el of selfAndDescendants(root, DENSE_CANDIDATE)) {
+    if (el.closest(SKIP_CLOSEST)) continue;
+    if (el.hasAttribute(DONE_ATTR)) continue;
+    if (el.querySelector('x-yi')) continue;        // 同標準路徑：已翻過的不再收
+    if (el.querySelector(UNIT_SELECTOR)) continue; // 裡面有標準單位，讓標準單位去翻
+    // 祖先是標準單位時也不能收：<p>文字<span>更多文字</span></p> 會讓 p 與 span
+    // 各自成為單位，兩邊都掛譯文＝同一段翻兩次、還互相巢狀。
+    if (el.closest(UNIT_SELECTOR)) continue;
+    if (inPageChrome(el)) continue;
+
+    const direct = directText(el).trim();
+    if (direct.length < SEGMENT_TUNING.MIN_DIRECT_TEXT_LENGTH) continue; // 殺時間戳
+    if (wordCount(direct) < SEGMENT_TUNING.MIN_WORDS) continue;          // 殺帳號名／標籤
+    if (!/[\p{L}]/u.test(direct)) continue;
+
+    const total = (el.textContent ?? '').trim().length;
+    if (direct.length / Math.max(total, 1) < SEGMENT_TUNING.MIN_DIRECT_TEXT_RATIO) continue;
+
+    hits.push(el);
+  }
+  // 父子都命中時只留最外層。
+  // 留最內層會弄丟祖先「自己的」那段文字——<div>祖先的句子<span>子層句子</span></div>
+  // 兩層都可能過門檻，丟掉 div 就等於丟掉「祖先的句子」，那段永遠不會被翻。
+  // 留最外層則不會遺漏：祖先的 textContent 本來就涵蓋子層，一次翻完整塊。
+  // 用 Set ＋ 往上走訪而不是兩兩 contains()：後者是 O(n²)，
+  // 密度備援只在「沒有語意標記」的頁面啟動，那種頁面命中數可能上千。
+  const hitSet = new Set(hits);
+  return hits.filter((el) => {
+    for (let p = el.parentElement; p; p = p.parentElement) {
+      if (hitSet.has(p)) return false; // 有祖先也命中，交給祖先代表這一塊
+    }
+    return true;
+  });
+}
+
+/**
+ * 取要送翻的文字（MVP：純文字。行內格式的保留是之後 LLM 引擎的事）。
+ *
+ * 不能直接用 textContent：收集時擋掉「已含譯文」的候選只在那一刻有效，
+ * 單位排進佇列後、真正輪到它翻譯之前，SPA 仍可能在它底下插入新節點並先被翻掉。
+ * 那時 textContent 會把譯文一起帶進來，等於拿譯文當原文再翻一次。
+ * 所以這裡自己走訪文字節點，跳過整個 <x-yi> 子樹。
+ */
 export function unitText(el: HTMLElement): string {
-  return (el.textContent ?? '').replace(/\s+/g, ' ').trim();
+  let out = '';
+  const walk = (node: Node) => {
+    for (const child of node.childNodes) {
+      if (child.nodeType === Node.TEXT_NODE) out += child.nodeValue ?? '';
+      else if (child instanceof Element && child.tagName !== 'X-YI') walk(child);
+    }
+  };
+  walk(el);
+  return out.replace(/\s+/g, ' ').trim();
 }

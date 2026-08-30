@@ -47,6 +47,18 @@ Chrome 擴充（WXT + TypeScript + React）。預設用 Chrome 內建 Translator
 - LanguageDetector 在 content script：**spike 2 實測不可用，Batch 1 實測可用**（`detectorBroken: false`）。
   兩次結果不同，所以不要把任一邊當成定論。架構刻意不依賴任何一邊：偵測器優先，
   `guessSource` 備援殿後，兩條路共用 segmenter 匯出的同一份 `KANA` 定義（各寫一份遲早會不一致，#7 就是這樣來的）。
+- **`.pw-profile` 不留任何登入 cookie，Threads 與 Reddit 一律不登入測**：repo 未來要公開，
+  少一個要保護的祕密就少一個外洩面。登入態不另測——先前人工測試即為登入態，
+  貼文結構同樣是 div/span 疊出來的，已被未登入的驗證涵蓋。
+- Threads 未登入會彈登入牆 dialog，並把 `document.scrollHeight` 壓成視窗高度（實測 900），
+  捲動完全無效、內容也進不了 DOM。verify.mjs 會在載入後與捲動前各按一次 Escape 關掉
+  （通用 modal 手勢，非單站 hack）；關掉後 docH 900 → 10976。
+- **Threads 會虛擬化列表**：貼文容器不論捲到哪都固定只有 5~6 個在 DOM 裡，離開視窗即整個卸載，
+  連同我們的 `<x-yi>` 一起消失。所以這類站要看 `xyiPeak` 或 `stats.done`，
+  「跑完當下的 xyiCount」量到的是視窗容量，不是翻譯成效。
+- Reddit 首頁（`https://www.reddit.com/`）被反機器人擋（`Prove your humanity`），
+  未登入讀不到內容；`https://www.reddit.com/r/programming/` 可以直接讀。
+  `old.reddit.com` 需要登入，同樣不用。
 - `Translator.availability()` 在**每個新 browser session** 對 ja 會先回 `downloadable`，
   `create()` 一次後約 5 秒轉 `available`——是暖機不是重新下載（模型已在磁碟）。
   這會同時影響 popup 的 `allReady` 判斷與 content script 的跳過邏輯；處理方式見 BACKLOG #8。

@@ -75,6 +75,10 @@ function App() {
             ? `翻譯中——找到 ${s.found}、完成 ${s.done}、失敗 ${s.failed}；` +
               `跳過：中文 ${s.skippedChinese}、非英日 ${s.skippedDetect}、語言包 ${s.skippedPack}。` +
               (packs ? `語言包：${packs}。` : '') +
+              // 分段策略（#2）：零遙測沒有遠端 log，診斷資訊只能放在使用者看得到的地方
+              (s.mode === 'dense'
+                ? `分段：密度備援（標準選擇器不夠用，備援多撈 ${s.fallbackFound} 個）。`
+                : '分段：標準。') +
               (s.detectorBroken ? '（語言偵測器在此環境不可用，已改用備援判斷）' : '')
             : '這一頁已經在翻譯中。',
         );
