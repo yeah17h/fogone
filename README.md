@@ -91,8 +91,19 @@ node scripts/verify-yt.mjs [videoId] [秒]  # YouTube 字幕：cue 數、引擎�
 node scripts/spike-summarizer.mjs          # Summarizer API 可行性量測（不會觸發下載）
 ```
 
-驗證跑真的 Chrome，需要一個已安裝擴充的固定 profile（`.pw-profile`，一次性設定）。
-細節與所有已實測的環境事實見 `CLAUDE.md`。
+驗證跑的是系統安裝的正式版 Chrome（本地 Translator API 只存在於它），
+用 `.pw-profile` 這個固定 profile。**第一次要做一次性設定**：
+
+1. 先 `npm run build:test`
+2. 跑任一驗證腳本，它會開一個 Chrome 視窗
+3. 在該視窗進 `chrome://extensions` → 開啟開發人員模式 → 載入未封裝項目 → 選 `.output/chrome-mv3`
+4. 點擴充圖示 →「啟用本地翻譯」下載語言包
+
+之後這個 profile 就記住了，rebuild 後直接重跑驗證即可。
+（需要登入才能測的站，也在這個 profile 登入一次；但目前刻意不登入任何站——
+repo 要公開，profile 裡少一份登入 cookie 就少一個要保護的祕密。）
+
+所有已實測的環境事實記在 `CLAUDE.md`。
 
 ### 結構
 
@@ -105,6 +116,8 @@ lib/scheduler.ts           可視優先佇列、MutationObserver、統計
 lib/renderer.ts            <x-yi> 譯文節點的注入與移除
 lib/cache.ts               分頁層級翻譯快取（LRU）
 lib/sites/                 站點專屬模組（目前：YouTube 字幕）
+types/builtin-ai.d.ts      Translator / LanguageDetector 的型別宣告
+                           （TypeScript 官方 DOM 型別尚未收錄這些 API）
 ```
 
 站點專屬的知識一律關在 `lib/sites/` 裡 —— 通用管線不出現任何站名判斷。
@@ -114,7 +127,8 @@ lib/sites/                 站點專屬模組（目前：YouTube 字幕）
 ## 尚未完成
 
 翻譯快取的持久化（IndexedDB）、BYOK 引擎、資料流向面板、行內格式保留、
-PDF、摘要模式、設定頁。已知問題與待辦見 `BACKLOG.md`。
+站點例外規則（資料驅動的例外清單）、PDF、摘要模式、設定頁。
+已知問題與待辦見 `BACKLOG.md`。
 
 ---
 

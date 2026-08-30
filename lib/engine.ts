@@ -28,7 +28,7 @@ export class LocalEngine implements Engine {
   }
 
   /**
-   * 注意（鐵律 7）：語言包尚未下載時，create() 需要使用者手勢。
+   * 注意（鐵律 5）：語言包尚未下載時，create() 需要使用者手勢。
    * 骨架的設計是：下載只發生在 popup 的「啟用」按鈕（有手勢），
    * content script 只在 availability === 'available' 時才呼叫這裡。
    */

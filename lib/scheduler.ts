@@ -224,7 +224,7 @@ export class Session {
   /**
    * 文字層級的翻譯管線：中文判斷 → 語言偵測 → 快取 → 語言包 → 引擎。
    * DOM 單位（translateUnit）與站點模組（字幕）共用這一條，
-   * 所以快取、統計、鐵律 7 的語言包檢查只有一份實作。
+   * 所以快取、統計、鐵律 5 的語言包檢查只有一份實作。
    *
    * onEngineStart 在「確定要打引擎、而且不是快取命中」的那一刻呼叫，
    * 讓呼叫端有機會先掛上載入中的佔位符；快取命中不會呼叫它（沒有等待可言）。
@@ -248,7 +248,7 @@ export class Session {
       return { ok: true, text: cached, fromCache: true };
     }
 
-    // 鐵律 7：content script 不觸發下載。語言包還沒好就跳過，由 popup 引導使用者啟用。
+    // 鐵律 5：content script 不觸發下載。語言包還沒好就跳過，由 popup 引導使用者啟用。
     // availability() 本身也可能丟例外，那要記成 'error' 而不是留白——留白會看起來像沒查過。
     let avail: string;
     try {
