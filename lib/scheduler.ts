@@ -7,6 +7,7 @@ import {
   SEGMENT_TUNING, unitText, type SegmentMode,
 } from './segmenter';
 import { ensureStyle, fail, fill, mountPlaceholder } from './renderer';
+import { cacheKey, translationCache } from './cache';
 
 const CONCURRENCY = 3;
 
@@ -34,6 +35,17 @@ export interface SessionStats {
   mode: SegmentMode;
   /** 密度備援比標準選擇器多撈到幾個單位（mode === 'standard' 時恆為 0） */
   fallbackFound: number;
+  /** 實際打進引擎的翻譯呼叫數（#10）。快取命中不算在內。 */
+  engineCalls: number;
+  /**
+   * 快取命中數（#10）。
+   * 不變式：**全部工作結束、且 failed === 0、且 session 沒被中途停掉**時，
+   * `done === engineCalls + cacheHits`。有失敗時 engineCalls 已加一但 done 不會加，
+   * 中途 stop() 的那一筆兩邊都不加，所以別把這條當成隨時成立的恆等式。
+   */
+  cacheHits: number;
+  /** 快取目前存了幾筆（跨 Session，關掉再打開不會歸零） */
+  cacheSize: number;
 }
 
 /** 備援語言判斷：偵測器不可用時的粗規則（有假名→ja；拉丁字母為主→en） */
@@ -62,9 +74,15 @@ export class Session {
     availability: {},
     mode: 'standard',
     fallbackFound: 0,
+    engineCalls: 0,
+    cacheHits: 0,
+    cacheSize: 0,
   };
 
   constructor(private doc: Document) {
+    // 快取是跨 Session 的單例，新 Session 一開始就該回報它真實的大小，
+    // 否則「關掉再打開」後統計列會顯示存 0 筆，看起來像快取沒生效。
+    this.stats.cacheSize = translationCache.size;
     ensureStyle(doc);
     this.io = new IntersectionObserver((entries) => {
       for (const e of entries) {
@@ -176,7 +194,22 @@ export class Session {
     if (!text || looksChinese(text)) { this.stats.skippedChinese++; return; }
 
     const source = await this.detectSource(text);
+    if (this.stopped) return; // 偵測期間使用者可能已按下關閉，別再往下掛節點
     if (!source) { this.stats.skippedDetect++; return; } // 非 en/ja：MVP 先跳過
+
+    // 快取查詢排在語言包檢查「之前」（#10）：手上已經有譯文就根本不需要引擎，
+    // 語言包在不在也就不重要了。順帶讓虛擬化站捲回時能立刻補上譯文。
+    const key = cacheKey(this.engine.id, source, TARGET, text);
+    const cached = translationCache.get(key);
+    if (cached !== undefined) {
+      if (this.stopped) return; // unmountAll 可能已經跑過，這時掛上去就成了孤兒節點
+      const node = mountPlaceholder(unit);
+      fill(node, cached); // 同步接上，不會閃一下佔位符
+      this.stats.cacheHits++;
+      this.stats.done++;
+      this.stats.cacheSize = translationCache.size;
+      return;
+    }
 
     // 鐵律 7：content script 不觸發下載。語言包還沒好就跳過，由 popup 引導使用者啟用。
     // availability() 本身也可能丟例外，那要記成 'error' 而不是留白——留白會看起來像沒查過。
@@ -187,10 +220,12 @@ export class Session {
       avail = 'error';
     }
     this.stats.availability[`${source}→${TARGET}`] = avail;
+    if (this.stopped) return;  // availability() 也是 await，同樣要重新確認
     if (avail !== 'available') { this.stats.skippedPack++; return; }
 
     const node = mountPlaceholder(unit);
     try {
+      this.stats.engineCalls++;
       const translation = await this.engine.translate({
         text,
         sourceLanguage: source,
@@ -198,7 +233,9 @@ export class Session {
       });
       if (this.stopped) { node.remove(); return; }
       fill(node, translation);
+      translationCache.set(key, translation);
       this.stats.done++;
+      this.stats.cacheSize = translationCache.size;
     } catch {
       fail(node);
       this.stats.failed++;

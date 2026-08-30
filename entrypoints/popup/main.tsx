@@ -79,6 +79,11 @@ function App() {
           s
             ? `翻譯中——找到 ${s.found}、完成 ${s.done}、失敗 ${s.failed}；` +
               `跳過：中文 ${s.skippedChinese}、非英日 ${s.skippedDetect}、語言包 ${s.skippedPack}。` +
+              // 引擎呼叫 vs 快取命中（#10）：驗收要靠這兩個數字，
+              // 也讓使用者看得出「重翻」到底有沒有真的省下來
+              // ?? 0：擴充更新後、分頁還沒重新整理時，舊 content script 回來的 stats
+              // 沒有這三個欄位，直接內插會印出「引擎呼叫 undefined」
+              `引擎呼叫 ${s.engineCalls ?? 0}、快取命中 ${s.cacheHits ?? 0}（存 ${s.cacheSize ?? 0} 筆）。` +
               (packs ? `語言包：${packs}。` : '') +
               // 分段策略（#2）：零遙測沒有遠端 log，診斷資訊只能放在使用者看得到的地方
               (s.mode === 'dense'
