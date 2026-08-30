@@ -11,13 +11,16 @@
 ## #2 [P0] Threads 類 div/span 結構抓不到主內容
 - 現象：Threads 找到 7、完成 0；貼文全是 div/span 疊出來的，不在 UNIT_SELECTOR 涵蓋範圍。
 - 方向：兩段式分段——標準選擇器命中數過低時啟動備援策略：以「直接文字節點豐富」的葉層 div 為單位（文字密度啟發式），或優先對 article、[role=article] 容器切段。
-- 驗收（2026-08-30 修訂）：`node scripts/verify.mjs '<threads 搜尋頁>' --scroll`，
-  貼文正文出現雙語，且不得出現帳號名／時間戳被翻譯。
-  **數量指標改看 `stats.done` 與 `xyiPeak`，不看結束時的 `xyiCount`**——理由見下方虛擬化那條。
+- 驗收（2026-08-30 修訂並採用）：`node scripts/verify.mjs '<threads 搜尋頁>' --scroll`
+  1. 數量：**`stats.done` ≥ 20**。
+  2. 品質（不變）：貼文正文出現雙語，且不得出現帳號名／時間戳被翻譯。
+
+  `xyiCount` 與 `xyiPeak` 仍會列在回報裡當參考值，但**不作為驗收依據**——
+  它們量的是量測當下 DOM 裡還掛著幾個節點，理由見下方虛擬化那條。
 - 已完成（Batch 2）。採方案 C：兩段式＝觸發門檻 ＋ 文字密度啟發式 ＋ 品質閘門。
-  實測（未登入，`--scroll`）：mode=dense、found 44、fallbackFound 43、done 27、failed 0、
-  xyiPeak 14~19（每次略有浮動）、xyiCount 結束時 12。截圖確認帳號名
-  （javascript_concepts_daily、lihazadnan.ai）與時間戳（2026-8-21）皆未被翻譯。
+  實測（未登入，`--scroll`）：mode=dense、found 40、fallbackFound 39、**done 28**、failed 0、
+  擴充錯誤 0；參考值 xyiPeak 18、xyiCount 結束時 13。截圖確認帳號名
+  （javascript_concepts_daily、saas_addy）與時間戳（2026-8-20）皆未被翻譯。
 - **Threads 會虛擬化列表**：貼文容器（`[data-pressable-container]`）不論捲到哪裡都固定只有
   5~6 個在 DOM 裡，離開視窗的貼文被整個卸載，連同我們的 `<x-yi>` 一起消失
   （實測 xyi 與 done 每次取樣都相等，代表節點不是被 React 清掉，是連同貼文一起卸載）。
@@ -119,3 +122,16 @@
   風險是導覽連結全部湧入，得靠 #1 的外框排除與詞數閘門擋住——先量再改。
 - 驗收：`node scripts/verify.mjs https://www.reddit.com/r/programming/ --scroll`
   貼文標題出現雙語，且導覽與側欄仍零譯文。
+
+## #10 [P1] session 級記憶體翻譯快取
+- 動機：Threads 這類虛擬化站會把貼文連同 `<x-yi>` 一起卸載，捲回時節點是重建的，
+  `data-yi-done` 很可能隨之消失——那等於同一段文字被重翻。
+  本地引擎重翻只是浪費電，但 BYOK 引擎重翻就是真金白銀；而且快取本來就在 M1 範圍內。
+- **動工第一步：先驗證上述假設**——捲下讓貼文卸載、再捲回，量測重建後的節點
+  有沒有 `data-yi-done`、以及 `stats.done` 有沒有再往上跳（跳了就是真的在重翻）。
+  把實測結果寫回本項備註，再決定實作。假設不成立就不用做。
+- 方向：`Map<hash(原文 ＋ 引擎 id ＋ 語言對) → 譯文>`，命中就直接渲染、不進引擎。
+  key 要含引擎 id 與語言對，否則之後 BYOK 切換引擎會拿到上一個引擎的譯文。
+  這是 M1 原定 IndexedDB 持久快取的第一階段，持久化留待後續。
+- 驗收：Threads 捲下再捲回，重掛的貼文**即時**出現譯文（不經引擎所以沒有延遲），
+  且引擎呼叫數不隨捲回次數增加。

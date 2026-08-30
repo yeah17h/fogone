@@ -27,8 +27,13 @@ Chrome 擴充（WXT + TypeScript + React）。預設用 Chrome 內建 Translator
 ## 驗證迴圈（每個修改都要走完）
 1. `npm run compile && npm run build:test`
 2. `node scripts/verify.mjs <與該 issue 相關的網站>`（動態頁加 `--scroll`）
-3. 讀 stdout 的 xyiCount 與 reports/verify.png 截圖，對照 BACKLOG.md 該項的驗收標準
+3. 讀 stdout 的統計與 reports/verify.png 截圖，對照 BACKLOG.md 該項的驗收標準
 4. 不過就繼續改；過了才收工，回報 diff 摘要與驗證數據
+
+**驗收指標的原則：量測「完成的翻譯工作」，不量測「量測當下的 DOM 殘留」。**
+所以數量看 `stats.done`（累計完成數），不看 `xyiCount`——虛擬化的站（Threads 實測貼文容器
+固定只有 5~6 個在 DOM 裡）會把離開視窗的內容連同 `<x-yi>` 一起卸載，`xyiCount` 量到的是
+視窗容量而不是成效。`xyiCount` 與 `xyiPeak` 仍值得回報當參考值，但不作驗收依據。
 
 ## 環境事實（已實測，不用懷疑也不用重驗）
 - 本地 Translator API 只存在於真 Chrome 138+ 桌面版；Playwright 內建 Chromium 沒有 → verify 一律用系統安裝的正式版 Chrome
