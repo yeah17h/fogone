@@ -61,6 +61,33 @@ Chrome 擴充（WXT + TypeScript + React）。預設用 Chrome 內建 Translator
 - **Threads 會虛擬化列表**：貼文容器不論捲到哪都固定只有 5~6 個在 DOM 裡，離開視窗即整個卸載，
   連同我們的 `<x-yi>` 一起消失。所以這類站要看 `xyiPeak` 或 `stats.done`，
   「跑完當下的 xyiCount」量到的是視窗容量，不是翻譯成效。
+- **YouTube 字幕（M2 偵察，2026-08-31）**
+  - 結構：`.ytp-caption-window-container` > `.caption-window` > `.captions-text`
+    > `.caption-visual-line` > `.ytp-caption-segment`。容器在 `#movie_player` 內，
+    **全螢幕時是同一個節點**——譯文掛在容器裡就會自動跟著進全螢幕，不必另外處理。
+  - 人工字幕：整句替換，約 0.2 次/秒。
+    **自動生成 CC：滾動視窗**，逐字往後長、前面被截掉，約 2.7 次/秒
+    （間隔 min 17ms / p50 237ms / p90 600ms / max 3589ms）。沒有乾淨的 cue 邊界。
+  - 讀字幕文字**必須用空格接** `.caption-visual-line`：直接串 textContent 會黏成
+    「coming tothe」「itpacked」（兩個 segment 之間沒有空白節點）。
+  - **字幕視窗的位置寫在 style 屬性上，而且會自己移動**：播放器控制列一出現，
+    YouTube 就把字幕往上抬（實測讓出 80px），控制列收起又貼回底部。
+    要跟著它移動就得觀察 `attributes: ['style']`，只看 childList/characterData 會漏。
+  - **預設字幕位置下方放不下一行譯文**：字幕視窗底部距容器底僅約 10px
+    （`winBottomInContainer` 485 vs `containerH` 495），而一行譯文約 40px。
+    目前的處理是「下方塞得下就放下方，塞不下就放上方」，兩種情況都不遮住原文。
+    要讓譯文一律在下方，只能注入 CSS 把原文字幕往上推——那會改到原文的呈現位置，
+    尚未決定要不要做（見 BACKLOG #11）。
+  - SPA 導航依序觸發 `yt-navigate-start` → `yt-page-type-changed` → `yt-page-data-updated`
+    → `yt-navigate-finish`。離開影片頁後字幕容器消失。
+    自動化測試裡最穩的站內導航是點播放器的 `.ytp-next-button`；
+    側邊欄推薦的節點結構常改，選擇器容易失效。
+  - 找有「自動生成」字幕的影片：字幕選單標籤會寫「英文 (自動產生)」。
+    播放器的 `getOption('captions','tracklist')` 在這版**不填 `kind`/`name`**，
+    用它判斷 ASR 會失手，讀選單標籤比較可靠。
+  - 已知邊界（本批未特別處理）：直播與廣告的字幕**未實測**。
+    依模組設計推論，兩者都只是「容器裡出現文字」，會被當成一般字幕處理；
+    廣告通常沒有 CC 所以多半不會有動作。要當成事實之前需要實測。
 - **Summarizer API：存在，但不能輸出中文**（spike 3，2026-08-30，`node scripts/spike-summarizer.mjs`）。
   - 介面盤點：`Summarizer` ✓、`LanguageModel` ✓、`Translator` ✓、`LanguageDetector` ✓；
     `Writer` ✗、`Rewriter` ✗。
