@@ -105,11 +105,17 @@ Chrome 擴充（WXT + TypeScript + React）。預設用 Chrome 內建 Translator
 - Reddit 首頁（`https://www.reddit.com/`）被反機器人擋（`Prove your humanity`），
   未登入讀不到內容；`https://www.reddit.com/r/programming/` 可以直接讀。
   `old.reddit.com` 需要登入，同樣不用。
-- `Translator.availability()` 曾在每個新 browser session 對 ja 先回 `downloadable`，
-  `create()` 一次後約 5 秒轉 `available`。**Batch 3 複測已不再重現**：連續三次全新 Chrome、
-  完全不呼叫 `create()`，ja 都直接是 `available`。判讀：當時語言包還沒真的裝完，
-  那 5 秒是補完下載的尾巴而不是「暖機」。→ 不需要每個 session 暖機（BACKLOG #8 已結案）。
-  對照組 `ko→zh-Hant` 仍是 `downloadable`，可用來確認 availability 真的會回報未下載狀態。
+- `Translator.availability()` 對 ja 的 `downloadable` 觀察，**兩件事要分清楚**：
+  - **已否證**：「每個 browser session 都需要暖機」。Batch 3 連續三次全新 Chrome、
+    完全不呼叫 `create()`，ja 三次都直接是 `available`。所以不必實作自動暖機。
+  - **未否證**：**全新安裝的「安裝尾巴」狀態**——語言包剛下載、還沒真的裝完的那段時間，
+    availability 會回 `downloadable`，`create()` 一次後約 5 秒轉 `available`。
+    Batch 3 之後沒再重現，但那是因為這台機器的語言包早就裝好了，
+    **「沒再出現」不等於「不會發生」**。內測者全是全新安裝，正是最可能撞上這個狀態的族群。
+  - 對照組 `ko→zh-Hant` 至今仍是 `downloadable`，可用來確認 availability 真的會回報未下載狀態。
+  - 因此 popup「逐對顯示 availability、只要有一對可用就給翻譯鈕」的防線**要留著**
+    （BACKLOG #8 已實作）：使用者看得到是哪一對卡住、卡在 `downloadable` 還是 `downloading`，
+    點一次啟用即可恢復。這條防線的價值不在於症狀有沒有重現，而在於症狀重現時使用者不會一頭霧水。
 - **`Translator.create()` 在無使用者手勢下不會被擋**（實測：等 transient activation 過期、
   `navigator.userActivation.isActive === false` 之後呼叫，照樣成功）。
   這代表**鐵律 5 是我們自律的，不是平台幫我們強制的**——content script 若對
@@ -124,3 +130,8 @@ Chrome 擴充（WXT + TypeScript + React）。預設用 Chrome 內建 Translator
 - 一次只做 BACKLOG.md 的一個項目；動工前先簡述計畫再改
 - 改 lib/segmenter.ts、lib/scheduler.ts 前先完整讀該檔
 - 不主動新增依賴；需要時先提出理由
+- **禁用 `git add -A` 與 `git add .`**：一律明確列出路徑 stage。
+  **沒讀過的檔案不准 commit。**（實績：Batch 4 用 `git add -A` 把使用者的營運文件與
+  一份試算表掃進 docs commit，其中二進位檔到退檔為止都沒被開啟過。）
+- 專案根目錄出現的非程式檔（營運文件、試算表之類）一律視為未追蹤：不碰、不 stage、不改，
+  發現了回報一聲就好。
