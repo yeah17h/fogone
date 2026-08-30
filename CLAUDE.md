@@ -61,6 +61,20 @@ Chrome 擴充（WXT + TypeScript + React）。預設用 Chrome 內建 Translator
 - **Threads 會虛擬化列表**：貼文容器不論捲到哪都固定只有 5~6 個在 DOM 裡，離開視窗即整個卸載，
   連同我們的 `<x-yi>` 一起消失。所以這類站要看 `xyiPeak` 或 `stats.done`，
   「跑完當下的 xyiCount」量到的是視窗容量，不是翻譯成效。
+- **Summarizer API：存在，但不能輸出中文**（spike 3，2026-08-30，`node scripts/spike-summarizer.mjs`）。
+  - 介面盤點：`Summarizer` ✓、`LanguageModel` ✓、`Translator` ✓、`LanguageDetector` ✓；
+    `Writer` ✗、`Rewriter` ✗。
+  - `Summarizer.availability({ outputLanguage })` 掃描結果：
+    `en / ja / es / fr / de` → `downloadable`；
+    **`zh` / `zh-Hans` / `zh-Hant` / `zh-TW` / `zh-CN` / `ko` → `unavailable`**。
+    加上 `expectedInputLanguages: ['en']` 也一樣。擴充頁面環境結果相同。
+  - `unavailable` 與 `downloadable` 在這個 API 裡意義不同：前者是「這個組合根本不支援」，
+    不是「還沒下載」。所以本地 Summarizer **無法直接產生繁中摘要**。
+  - 若要做「摘要模式」又要守住鐵律 1（文字不出裝置），只剩兩段式：
+    本地 Summarizer 產英文摘要 → 本地 Translator 翻成繁中。代價是誤差疊加，
+    且要先下載 Gemini Nano（GB 級）。另一條路是 BYOK 直接產繁中摘要。**尚未決定。**
+  - `scripts/spike-summarizer.mjs` 預設**不會觸發下載**（Summarizer 背後是 GB 級模型）；
+    要測下載與實際摘要品質得加 `--allow-download`。
 - Reddit 首頁（`https://www.reddit.com/`）被反機器人擋（`Prove your humanity`），
   未登入讀不到內容；`https://www.reddit.com/r/programming/` 可以直接讀。
   `old.reddit.com` 需要登入，同樣不用。
