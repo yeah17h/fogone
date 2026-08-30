@@ -31,9 +31,25 @@ Chrome 擴充（WXT + TypeScript + React）。預設用 Chrome 內建 Translator
 4. 不過就繼續改；過了才收工，回報 diff 摘要與驗證數據
 
 ## 環境事實（已實測，不用懷疑也不用重驗）
-- 本地 Translator API 只存在於真 Chrome 138+ 桌面版；Playwright 內建 Chromium 沒有 → verify 一律 `channel: 'chrome'`
-- LanguageDetector 在 content script 不可用；備援語言判斷（scheduler 的 guessSource）已內建
-- `.pw-profile` 是 verify 專用的固定 Chrome profile：第一次跑要在跳出的視窗手動點擴充圖示「啟用本地翻譯」（一次性）；要測 Threads 等需登入的站，也在這個 profile 登入一次即可
+- 本地 Translator API 只存在於真 Chrome 138+ 桌面版；Playwright 內建 Chromium 沒有 → verify 一律用系統安裝的正式版 Chrome
+- **正式版 Chrome 已移除 `--load-extension`（本機實證，Chrome 152）**：該旗標與 `--disable-extensions-except` 都不再生效，
+  且 Playwright 預設會帶 `--disable-extensions`。結論：不要再嘗試用命令列旗標或 `launchPersistentContext` 注入擴充，
+  CDP `Extensions.loadUnpacked` 那條路要非常規旗標（`--enable-unsafe-extension-debugging`），也不走。
+- verify 的做法：`child_process.spawn` 真 Chrome（`--remote-debugging-port=9333 --user-data-dir=<root>/.pw-profile`）
+  → `chromium.connectOverCDP` 附加 → `browser.contexts()[0]` 開分頁跑流程 → 結束時斷線並終止該 Chrome。
+  **啟動前會先清掉佔用同 profile 的殘留 Chrome 行程**：同 profile 已有實例時，新啟動的 Chrome
+  只會把網址轉交給舊實例然後自己退出，於是實際測到的是舊實例載入的**舊擴充產物**——
+  rebuild 完全不生效而且無聲無息。這個坑踩過一次，別把清理邏輯拿掉。
+- `.pw-profile` 是 verify 專用的固定 Chrome profile，**需要一次性手動安裝擴充**：
+  chrome://extensions → 開發人員模式 → 載入未封裝 → 選 `.output/chrome-mv3` → 再點擴充圖示「啟用本地翻譯」下載語言包。
+  裝過之後擴充就留在該 profile，每次啟動 Chrome 都從磁碟重讀 `.output/chrome-mv3`——**rebuild 後直接重跑 verify 即生效**。
+  要測 Threads 等需登入的站，也在這個 profile 登入一次即可。
+- LanguageDetector 在 content script：**spike 2 實測不可用，Batch 1 實測可用**（`detectorBroken: false`）。
+  兩次結果不同，所以不要把任一邊當成定論。架構刻意不依賴任何一邊：偵測器優先，
+  `guessSource` 備援殿後，兩條路共用 segmenter 匯出的同一份 `KANA` 定義（各寫一份遲早會不一致，#7 就是這樣來的）。
+- `Translator.availability()` 在**每個新 browser session** 對 ja 會先回 `downloadable`，
+  `create()` 一次後約 5 秒轉 `available`——是暖機不是重新下載（模型已在磁碟）。
+  這會同時影響 popup 的 `allReady` 判斷與 content script 的跳過邏輯；處理方式見 BACKLOG #8。
 
 ## 工作方式
 - 一次只做 BACKLOG.md 的一個項目；動工前先簡述計畫再改

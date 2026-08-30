@@ -25,6 +25,9 @@ export default defineContentScript({
           session = null;
           unmountAll(document);
           console.info('[譯][dev] off');
+        } else if (d?.yi === 'stats') {
+          // 讓 verify.mjs 讀得到統計，才能對照 BACKLOG 用 stats 表述的驗收標準
+          window.postMessage({ yi: 'stats:result', stats: session ? { ...session.stats } : null }, '*');
         }
       });
       console.info('[譯][dev] trigger ready: window.postMessage({yi:"translate"}, "*")');

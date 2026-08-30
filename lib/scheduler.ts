@@ -2,7 +2,7 @@
 // PRD §6 效能鐵律的實作核心：先翻看得到的，看不到的等捲到再翻。
 
 import { LocalEngine, SUPPORTED_SOURCES, TARGET } from './engine';
-import { collectUnits, looksChinese, unitText } from './segmenter';
+import { collectUnits, KANA, looksChinese, unitText } from './segmenter';
 import { ensureStyle, fail, fill, mountPlaceholder } from './renderer';
 
 const CONCURRENCY = 3;
@@ -16,11 +16,19 @@ export interface SessionStats {
   skippedDetect: number;
   skippedPack: number;
   detectorBroken: boolean;
+  /**
+   * 每個語言對最後一次實際看到的 availability 值（#3），例如
+   * `{ 'ja→zh-Hant': 'downloadable', 'en→zh-Hant': 'available' }`。
+   * 光看 skippedPack 的數字分不出「還沒下載」和「下載中」，得記下實際值才知道
+   * 該引導使用者去 popup 啟用、還是叫他等一下。純字串物件，可結構化複製傳給 popup。
+   */
+  availability: Record<string, string>;
 }
 
 /** 備援語言判斷：偵測器不可用時的粗規則（有假名→ja；拉丁字母為主→en） */
 function guessSource(text: string): string | null {
-  if (/[\u3040-\u30ff]/.test(text)) return 'ja';
+  // 與 looksChinese 共用同一份假名定義：兩邊各寫一份遲早會不一致（#7 就是這樣來的）
+  if (KANA.test(text)) return 'ja';
   const letters = text.match(/\p{Letter}/gu) ?? [];
   const latin = text.match(/[A-Za-z]/g) ?? [];
   if (letters.length > 0 && latin.length / letters.length > 0.7) return 'en';
@@ -40,6 +48,7 @@ export class Session {
     found: 0, queued: 0, done: 0, failed: 0,
     skippedChinese: 0, skippedDetect: 0, skippedPack: 0,
     detectorBroken: false,
+    availability: {},
   };
 
   constructor(private doc: Document) {
@@ -136,7 +145,14 @@ export class Session {
     if (!source) { this.stats.skippedDetect++; return; } // 非 en/ja：MVP 先跳過
 
     // 鐵律 7：content script 不觸發下載。語言包還沒好就跳過，由 popup 引導使用者啟用。
-    const avail = await this.engine.availability(source, TARGET);
+    // availability() 本身也可能丟例外，那要記成 'error' 而不是留白——留白會看起來像沒查過。
+    let avail: string;
+    try {
+      avail = await this.engine.availability(source, TARGET);
+    } catch {
+      avail = 'error';
+    }
+    this.stats.availability[`${source}→${TARGET}`] = avail;
     if (avail !== 'available') { this.stats.skippedPack++; return; }
 
     const node = mountPlaceholder(unit);

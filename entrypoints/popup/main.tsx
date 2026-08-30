@@ -5,6 +5,7 @@
 import { useEffect, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import { SUPPORTED_SOURCES, TARGET } from '@/lib/engine';
+import type { SessionStats } from '@/lib/scheduler';
 
 type PairState = { source: string; state: string };
 
@@ -64,11 +65,16 @@ function App() {
       if (type === 'yi:off') { setStatus('已關閉並清除這一頁的譯文。'); return; }
       if (res?.reason === 'no-api') setStatus('此瀏覽器沒有本地翻譯 API（需要桌面版 Chrome 138+）。');
       else if (res?.already) {
-        const s = res.stats;
+        const s: SessionStats | undefined = res.stats;
+        // 語言包狀態逐對列出（#3）：只看「跳過：語言包 N」分不出是沒下載還是下載中
+        const packs = Object.entries(s?.availability ?? {})
+          .map(([pair, state]) => `${pair} ${state}`)
+          .join('、');
         setStatus(
           s
             ? `翻譯中——找到 ${s.found}、完成 ${s.done}、失敗 ${s.failed}；` +
               `跳過：中文 ${s.skippedChinese}、非英日 ${s.skippedDetect}、語言包 ${s.skippedPack}。` +
+              (packs ? `語言包：${packs}。` : '') +
               (s.detectorBroken ? '（語言偵測器在此環境不可用，已改用備援判斷）' : '')
             : '這一頁已經在翻譯中。',
         );
