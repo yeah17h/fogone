@@ -97,7 +97,7 @@
   在算 cjkRatio 之前先短路（`looksChinese` 回 false），交給 `guessSource` 判成 ja。
 - 驗收：Zenn 統計「跳過:中文」趨近 0，正文出現 ja→zh-Hant 雙語。
 
-## #8 [P1] ja 語言包每個 browser session 需暖機
+## #8 [P1] ja 語言包每個 browser session 需暖機（已結案：症狀不再重現，改為修 UX 阻擋）
 - 現象：`Translator.availability()` 在每個新 browser session 對 ja 會先回 `downloadable`，
   要 `create()` 過一次、約 5 秒後才轉 `available`（是暖機，不是重新下載——磁碟上已經有模型）。
   後果有兩個：popup 因 `allReady === false` 卡在「啟用本地翻譯」畫面，翻譯鈕根本不出現；
@@ -108,6 +108,21 @@
   - 評估 content script 對「`downloadable` 但模型其實已在磁碟」的情況能否直接 `create()`；
     若不行（會觸發下載＝違反鐵律 5），改成在 popup 顯示提示引導使用者點一次。
 - 驗收：重啟 Chrome 後第一次翻日文頁不再出現「跳過：語言包」，popup 不再卡在啟用畫面。
+- **複測結果（2026-08-30，Batch 3）：原症狀不再重現。** 連續三次全新 Chrome，
+  完全不呼叫 `create()` 直接讀 availability，`ja→zh-Hant` 三次都是 `available`
+  （同批對照組 `ko→zh-Hant` 是 `downloadable`，證明 availability 確實會回報未下載）。
+  重測 Zenn：`skippedPack: 0`、`availability: {"ja→zh-Hant":"available"}`、done 7。
+  → 原本觀察到的 `downloadable` 是**語言包當時還沒真的裝完**，那 5 秒的 `create()`
+  不是「暖機」而是補完下載的最後一段。一旦裝完就穩定回 `available`，不需要每個 session 暖機。
+  結論：不實作自動暖機——沒有東西要暖。
+- **但底下有個真的 bug，本項一併修掉**：popup 用 `pairs.every(available)` 當閘門，
+  只要有任何一個語言對沒好，翻譯鈕整個不出現。使用者的 en 明明可用，卻連英文頁都翻不了，
+  而且畫面上完全看不出原因——這正是「靜默跳過」。
+  改法：只要**有任一對**可用就給翻譯鈕；沒好的那幾對改用一行提示點名（含實際 availability 值，
+  區分 `downloadable` 與 `downloading`），啟用鈕仍在、文案改為「啟用其餘語言包」。
+  鐵律 5 完全不動：`create()` 依舊只發生在啟用鈕的點擊處理器裡。
+  四種狀態實測：都可用→只有翻譯鈕；en 可用 ja 未下載→翻譯鈕＋「尚未啟用：ja→繁中（downloadable）」；
+  都未下載→維持原首次使用流程；ja 下載中→「（downloading）」。
 
 ## #9 [P2] Reddit 貼文標題是裸 <a>，任何策略都收不到
 - 現象：`r/programming` 實測 found 16、done 2，捲動前後 xyiCount 都是 2。

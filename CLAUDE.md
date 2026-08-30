@@ -64,9 +64,20 @@ Chrome 擴充（WXT + TypeScript + React）。預設用 Chrome 內建 Translator
 - Reddit 首頁（`https://www.reddit.com/`）被反機器人擋（`Prove your humanity`），
   未登入讀不到內容；`https://www.reddit.com/r/programming/` 可以直接讀。
   `old.reddit.com` 需要登入，同樣不用。
-- `Translator.availability()` 在**每個新 browser session** 對 ja 會先回 `downloadable`，
-  `create()` 一次後約 5 秒轉 `available`——是暖機不是重新下載（模型已在磁碟）。
-  這會同時影響 popup 的 `allReady` 判斷與 content script 的跳過邏輯；處理方式見 BACKLOG #8。
+- `Translator.availability()` 曾在每個新 browser session 對 ja 先回 `downloadable`，
+  `create()` 一次後約 5 秒轉 `available`。**Batch 3 複測已不再重現**：連續三次全新 Chrome、
+  完全不呼叫 `create()`，ja 都直接是 `available`。判讀：當時語言包還沒真的裝完，
+  那 5 秒是補完下載的尾巴而不是「暖機」。→ 不需要每個 session 暖機（BACKLOG #8 已結案）。
+  對照組 `ko→zh-Hant` 仍是 `downloadable`，可用來確認 availability 真的會回報未下載狀態。
+- **`Translator.create()` 在無使用者手勢下不會被擋**（實測：等 transient activation 過期、
+  `navigator.userActivation.isActive === false` 之後呼叫，照樣成功）。
+  這代表**鐵律 5 是我們自律的，不是平台幫我們強制的**——content script 若對
+  `downloadable` 的語言對呼叫 `create()`，會真的開始下載且沒有任何東西會阻止。
+  「content script 只在 `available` 時翻譯」這條必須自己守住。
+- `downloadprogress` 事件**即使模型已在磁碟也會觸發**（實測 loaded 0→1），
+  所以不能用「有沒有收到 downloadprogress」來判斷這次 `create()` 是不是真的在下載。
+- 注意 Playwright 的 `page.evaluate()` 自帶 user activation（`isActive === true`）。
+  要測「無手勢」行為必須在 evaluate 內先等約 8 秒讓 transient activation 過期。
 
 ## 工作方式
 - 一次只做 BACKLOG.md 的一個項目；動工前先簡述計畫再改

@@ -31,7 +31,12 @@ function App() {
   const [busy, setBusy] = useState(false);
 
   const hasAPI = typeof Translator !== 'undefined';
-  const allReady = pairs.length > 0 && pairs.every((p) => p.state === 'available');
+  // 「還沒好的語言對」不該擋住「已經好的」（#8）：只要有一對可用就給翻譯鈕，
+  // 沒好的那幾對改用一行提示說清楚是哪一對、卡在什麼狀態。
+  // 舊寫法用 every()，只要 ja 沒好，連英文頁都翻不了，而且畫面上完全看不出原因。
+  const ready = pairs.filter((p) => p.state === 'available');
+  const pending = pairs.filter((p) => p.state !== 'available');
+  const anyReady = ready.length > 0;
 
   // 關鍵：所有 create() 在點擊的「同步階段」發起（帶手勢），下載並行
   const enable = () => {
@@ -103,20 +108,21 @@ function App() {
         </p>
       )}
 
-      {hasAPI && !allReady && (
+      {hasAPI && pending.length > 0 && (
         <>
           <p style={{ margin: '0 0 8px', color: '#5c6675' }}>
-            首次使用：下載本地語言包（{SUPPORTED_SOURCES.join('、')} → 繁中）。
-            下載後翻譯全程在你的裝置上進行。
+            {anyReady
+              ? `尚未啟用：${pending.map((p) => `${p.source}→繁中（${p.state}）`).join('、')}。`
+              : `首次使用：下載本地語言包（${SUPPORTED_SOURCES.join('、')} → 繁中）。下載後翻譯全程在你的裝置上進行。`}
           </p>
           <button onClick={enable} disabled={busy} style={btn}>
-            {busy ? '下載中…' : '啟用本地翻譯'}
+            {busy ? '下載中…' : anyReady ? '啟用其餘語言包' : '啟用本地翻譯'}
           </button>
           <p style={{ minHeight: 20, fontSize: 12, color: '#5c6675' }}>{progress}</p>
         </>
       )}
 
-      {hasAPI && allReady && (
+      {hasAPI && anyReady && (
         <>
           <button onClick={() => send('yi:translate')} style={btn}>雙語翻譯此頁</button>
           <button onClick={() => send('yi:off')} style={{ ...btn, background: '#eef1f5', color: '#1c2330' }}>
