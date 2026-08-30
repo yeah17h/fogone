@@ -111,7 +111,7 @@ function App() {
 
   return (
     <main style={{ width: 260, padding: 14, font: '14px/1.6 system-ui', color: '#1c2330' }}>
-      <h1 style={{ fontSize: 15, margin: '0 0 8px' }}>譯（開發版）</h1>
+      <h1 style={{ fontSize: 15, margin: '0 0 8px' }}>幾個譯思</h1>
 
       {!hasAPI && (
         <p style={{ color: '#b3261e' }}>

@@ -1,5 +1,5 @@
 {
-  "name": "yi-extension",
+  "name": "fogone",
   "description": "隱私優先雙語翻譯擴充（開發代號）— 預設本地翻譯，文字不出裝置",
   "private": true,
   "version": "0.1.0",

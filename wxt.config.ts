@@ -9,8 +9,8 @@ export default defineConfig({
     },
   }),
   manifest: {
-    name: '譯 — 本地雙語翻譯（開發版）',
-    description: '預設在你的裝置上完成翻譯，文字不出裝置。',
+    name: '幾個譯思 Fogone',
+    description: '本地雙語翻譯——預設在你的裝置上完成，內容不離開電腦。',
     permissions: [],
   },
 });
