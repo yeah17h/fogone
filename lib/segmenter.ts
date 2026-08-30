@@ -110,13 +110,18 @@ function isLinkLabel(el: HTMLElement): boolean {
 }
 
 /**
- * 收集 root 底下的翻譯單位。
+ * 收集 root 底下的翻譯單位（含 root 自身）。
  * 規則：符合 UNIT_SELECTOR、不在 SKIP_CLOSEST 裡、還沒翻過、
  * 且自身不包含其他翻譯單位（避免外層 <li> 和內層 <p> 重複翻）、
  * 不在頁面外框裡、不是純連結短標籤。
+ *
+ * root 自身一定要納入：MutationObserver 是把「新增的那個節點」直接傳進來的，
+ * 而 querySelectorAll 只找子孫。SPA 直接 append 一個 <p>（Threads 貼文、無限捲動
+ * 都是這個形狀）時，那個 <p> 永遠不會被收集——只有外面多包一層容器才會中。
  */
 export function collectUnits(root: ParentNode): HTMLElement[] {
-  const candidates = root.querySelectorAll<HTMLElement>(UNIT_SELECTOR);
+  const self = root instanceof HTMLElement && root.matches(UNIT_SELECTOR) ? [root] : [];
+  const candidates = [...self, ...root.querySelectorAll<HTMLElement>(UNIT_SELECTOR)];
   const units: HTMLElement[] = [];
   for (const el of candidates) {
     if (el.closest(SKIP_CLOSEST)) continue;
