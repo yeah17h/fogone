@@ -77,10 +77,17 @@ BYOK 模式下資料到的是你指定的那家供應商（那是你選的、你
 ## 待補
 
 - **repo 連結**：詳細說明最後一段的 TBD，公開 repo 後填入。
-- **商店圖片素材**（後台必填／選填，本批未做）：
-  - 小型宣傳圖 440×280（必填）
-  - 螢幕擷取畫面 1280×800 或 640×400，至少 1 張、最多 5 張
-  - 大型宣傳圖 920×680（選填）
-  - 現有可用素材：`reports/verify-yt.png`（YouTube 雙語字幕）、
-    `reports/after-bbc.png`（整頁雙語）——兩張都是 1280×800，
-    但含測試痕跡與瀏覽器 UI，正式素材應另外截。
+- ~~**商店圖片素材**~~ **已完成**：`store/assets/`，用 `node scripts/store-assets.mjs` 重新產生。
+  全部為 24-bit PNG、無 alpha、尺寸精確（後台要求的格式）。
+  - `promo-small-440x280.png`（必填）
+  - `screenshot-1-web.png`（MDN 英文技術文件雙語）
+  - `screenshot-2-youtube.png`（YouTube 自動生成 CC 雙語，全螢幕）
+  - `screenshot-3-popup.png`（擴充視窗＋零權限訴求）
+  - `screenshot-4-japanese.png`（Zenn 日文文章雙語）
+  - `promo-large-920x680.png`（選填）
+  - **送審前要決定的兩件事**：
+    1. 三張截圖含第三方網站內容（MDN、Zenn、YouTube 上一支 JSConf 演講）。
+       翻譯類擴充這樣做是慣例，但若要完全避開第三方素材的疑慮，
+       換成自有頁面或 CC 授權影片重跑即可（腳本的網址是常數，改一行）。
+    2. 視覺識別沿用**佔位圖示**的配色與 wordmark（BACKLOG #12 尚未完成）。
+       #12 做完後這批素材要重新產生，才不會出現「商店頁與擴充圖示長得不一樣」。

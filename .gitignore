@@ -5,3 +5,4 @@ node_modules/
 reports/
 .DS_Store
 .claude/settings.local.json
+store/assets/.raw/
