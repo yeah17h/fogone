@@ -7,3 +7,4 @@ reports/
 .claude/settings.local.json
 store/assets/.raw/
 public/pdfjs/
+.pdf-fixtures/

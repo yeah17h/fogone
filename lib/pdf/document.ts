@@ -10,28 +10,11 @@
 // 也不新增任何對外連線。
 import * as pdfjs from 'pdfjs-dist';
 import workerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
+import { toTextItems, type PageText } from './items';
+
+export type { TextItem, PageText } from './items';
 
 pdfjs.GlobalWorkerOptions.workerSrc = workerUrl;
-
-/** 一個文字片段，座標已轉成「左上原點、y 向下」的頁面座標系。 */
-export type TextItem = {
-  str: string;
-  /** 左緣 */
-  x: number;
-  /** 基線 y（PDF 原生是左下原點，這裡沿用，換算交給取用端） */
-  y: number;
-  width: number;
-  height: number;
-  /** 旋轉文字（直排裝訂線、圖軸標籤）——重排模式要剔除 */
-  rotated: boolean;
-};
-
-export type PageText = {
-  pageNumber: number;
-  width: number;
-  height: number;
-  items: TextItem[];
-};
 
 export type OpenedPdf = {
   numPages: number;
@@ -173,21 +156,7 @@ export async function openPdf(source: PdfSource, signal?: AbortSignal): Promise<
       try {
         const viewport = page.getViewport({ scale: 1 });
         const content = await page.getTextContent();
-        const items: TextItem[] = [];
-        for (const raw of content.items) {
-          if (!('str' in raw)) continue; // TextMarkedContent，不是文字
-          const t = raw.transform as number[];
-          if (!raw.str) continue;
-          items.push({
-            str: raw.str,
-            x: t[4],
-            y: t[5],
-            width: raw.width,
-            // height 偶爾是 0（某些字型），用 transform 的縱向縮放當備援
-            height: raw.height || Math.abs(t[3]) || 0,
-            rotated: Math.abs(t[1]) > 0.01 || Math.abs(t[2]) > 0.01,
-          });
-        }
+        const items = toTextItems(content.items);
         return { pageNumber, width: viewport.width, height: viewport.height, items };
       } finally {
         page.cleanup();
