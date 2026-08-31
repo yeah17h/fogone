@@ -41,8 +41,14 @@ export interface SessionStats {
   /**
    * 快取命中數（#10）。
    * 不變式：**全部工作結束、且 failed === 0、且 session 沒被中途停掉**時，
-   * `done === engineCalls + cacheHits`。有失敗時 engineCalls 已加一但 done 不會加，
-   * 中途 stop() 的那一筆兩邊都不加，所以別把這條當成隨時成立的恆等式。
+   * `done === engineCalls + cacheHits`。
+   *
+   * 三種會讓它不成立的情況（都不是 bug，是計數點的位置造成的）：
+   * 失敗時 engineCalls 已經加一但 done 不會加；
+   * **在 `await engine.translate()` 期間 stop()** 的那一筆，engineCalls 已經加一、
+   * 譯文也會寫進快取，但因為 stopped 而不加 done（先前這裡寫「兩邊都不加」，那是錯的）；
+   * 以及 done++ 之前的 DOM 操作若拋錯。
+   * 所以別把這條當成隨時成立的恆等式。
    */
   cacheHits: number;
   /** 快取目前存了幾筆（跨 Session，關掉再打開不會歸零） */

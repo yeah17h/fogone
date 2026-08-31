@@ -1,14 +1,21 @@
-// 檢視器頁面（5a：殼）——載入 PDF、抽出文字層、把結果攤出來。
+// 檢視器頁面：載入 PDF → 抽文字層 → 重排成段落 → 雙語對照。
 //
-// 這一批只做到「開得起來、抽得到字」。段落重建是 5b、雙語渲染是 5c，
-// 所以這裡刻意把「每頁抽到幾個片段、前幾段長什麼樣」直接顯示出來：
-// 那是 5b 的輸入，看得見才驗得了。
+// **重排頁面就是一般的 DOM**，所以雙語走的是網頁那條路，一字未改：
+// 把段落渲染成 <p>，然後 new Session(document)。可視優先佇列、語言判斷、
+// 引擎、快取、<x-yi> 注入全部沿用——PDF 這邊不需要第二套翻譯管線。
+//
+// 段落用**命令式**寫進容器，不交給 React 管：React 之後若重繪那棵子樹，
+// 會把 Session 掛上去的 <x-yi> 一起抹掉。那是別人的節點，React 不知道要留。
 //
 // 本機檔案走拖放與檔案選擇器，讀的是 File 物件，**完全不經過 file://**——
 // 因此不依賴使用者手動開啟「允許存取檔案網址」那個開關（見 docs/research/pdf-text-layer.md §1.5）。
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import { openPdf, assertSafePdfUrl, MAX_PDF_BYTES, type OpenedPdf, type PageText } from '@/lib/pdf/document';
+import { reflow, type Paragraph } from '@/lib/pdf/reflow';
+import { Session, type SessionStats } from '@/lib/scheduler';
+import { unmountAll } from '@/lib/renderer';
+import { LocalEngine } from '@/lib/engine';
 
 type Status =
   | { phase: 'idle' }
@@ -22,10 +29,11 @@ type Loaded = {
   name: string;
   numPages: number;
   title: string | null;
-  pages: PageText[];
+  pagesRead: number;
+  paragraphs: Paragraph[];
 };
 
-const MAX_PAGES_IN_SHELL = 30; // 5a 只是殼：超過就先截斷，效能調校是 5d
+const MAX_PAGES = 30; // 一次讀的頁數上限；效能調校是 5d
 
 function App() {
   const [status, setStatus] = useState<Status>({ phase: 'idle' });
@@ -33,6 +41,11 @@ function App() {
   const [dragging, setDragging] = useState(false);
   const fileInput = useRef<HTMLInputElement>(null);
   const docRef = useRef<OpenedPdf | null>(null);
+  const articleRef = useRef<HTMLElement | null>(null);
+  const sessionRef = useRef<Session | null>(null);
+  const [stats, setStats] = useState<SessionStats | null>(null);
+  const [translating, setTranslating] = useState(false);
+  const [statusLine, setStatusLine] = useState('');
 
   // 每次載入拿一個序號。所有 await 之後都要確認自己還是最新的那一次，
   // 否則「連續開兩份 PDF」會出現：慢的舊檔後完成、把新檔的畫面蓋掉；
@@ -42,7 +55,11 @@ function App() {
   const abortRef = useRef<AbortController | null>(null);
 
   const load = useCallback(async (
-    source: { kind: 'url'; url: string } | { kind: 'data'; data: ArrayBuffer },
+    // 接 File 而不是接讀好的 ArrayBuffer：`file.arrayBuffer()` 若在 load() 外面 await，
+    // 那段等待不受任何 generation 管。快速連選兩個檔案時，先讀完的那個會先拿到
+    // generation，於是**較早選的檔案反而變成最新的**；元件在讀取途中卸載也一樣，
+    // 讀完照樣會走進來 setState。把讀取搬進 generation 的保護範圍內。
+    source: { kind: 'url'; url: string } | { kind: 'file'; file: File },
     name: string,
     sourceUrl: string | null,
   ) => {
@@ -60,10 +77,14 @@ function App() {
 
     let doc: OpenedPdf | null = null;
     try {
-      doc = await openPdf(source, ac.signal);
+      const opened = source.kind === 'file'
+        ? { kind: 'data' as const, data: await source.file.arrayBuffer() }
+        : source;
+      if (gen !== genRef.current) return;
+      doc = await openPdf(opened, ac.signal);
       if (gen !== genRef.current) return;    // 已經被下一次載入取代
       docRef.current = doc;
-      const n = Math.min(doc.numPages, MAX_PAGES_IN_SHELL);
+      const n = Math.min(doc.numPages, MAX_PAGES);
       const pages: PageText[] = [];
       for (let p = 1; p <= n; p++) {
         if (gen !== genRef.current) return;
@@ -71,7 +92,9 @@ function App() {
         pages.push(await doc.getPageText(p));
       }
       if (gen !== genRef.current) return;
-      setLoaded({ sourceUrl, name, numPages: doc.numPages, title: doc.title, pages });
+      const paragraphs = reflow(pages);
+      setLoaded({ sourceUrl, name, numPages: doc.numPages, title: doc.title,
+                  pagesRead: pages.length, paragraphs });
       setStatus({ phase: 'ready' });
       doc = null;                            // 交棒給 docRef，不要在 finally 收掉
     } catch (e) {
@@ -103,17 +126,99 @@ function App() {
   useEffect(() => () => {
     genRef.current++;
     abortRef.current?.abort();
+    sessionRef.current?.stop();
+    sessionRef.current = null;
     void docRef.current?.destroy().catch(() => {});
     docRef.current = null;
   }, []);
 
-  const takeFile = useCallback(async (file: File) => {
+  // 停掉翻譯並清乾淨。**先 stop 再 unmountAll**：反過來的話已排入佇列的工作
+  // 還會繼續把譯文掛回剛清空的頁面上。
+  const stopTranslation = useCallback(() => {
+    sessionRef.current?.stop();
+    sessionRef.current = null;
+    unmountAll(document);
+    setTranslating(false);
+    setStats(null);
+    setStatusLine('');
+  }, []);
+
+  // 命令式把段落寫進容器。React 不管這棵子樹，Session 掛上去的 <x-yi>
+  // 才不會在下一次重繪時被抹掉。
+  useEffect(() => {
+    const host = articleRef.current;
+    if (!host) return;
+    stopTranslation();
+    host.replaceChildren();
+    if (!loaded) return;
+    let lastPage = 0;
+    for (const para of loaded.paragraphs) {
+      if (para.page !== lastPage) {
+        const marker = document.createElement('div');
+        marker.textContent = `第 ${para.page} 頁`;
+        // data-yi-skip：頁碼標記是我們自己加的介面文字，不該被當成內容翻譯
+        marker.dataset.yiSkip = '';
+        Object.assign(marker.style, {
+          font: '12px system-ui', color: '#8a93a3', margin: '26px 0 10px',
+          borderTop: '1px solid #eef1f5', paddingTop: 8,
+        });
+        host.append(marker);
+        lastPage = para.page;
+      }
+      const p = document.createElement('p');
+      p.textContent = para.text;
+      Object.assign(p.style, { margin: '0 0 14px', lineHeight: '1.8' });
+      host.append(p);
+    }
+  }, [loaded, stopTranslation]);
+
+  const startTranslation = useCallback(() => {
+    if (!LocalEngine.supported()) {
+      setStatusLine('這個瀏覽器沒有本地 Translator API（需要桌面版 Chrome 138+）。');
+      return;
+    }
+    stopTranslation();
+    const session = new Session(document);
+    sessionRef.current = session;
+    const found = session.start();
+    setTranslating(true);
+    setStats({ ...session.stats });
+    setStatusLine(found === 0 ? '沒有找到可翻譯的段落。' : '');
+  }, [stopTranslation]);
+
+  // 統計列要會動：翻譯是非同步的，不輪詢就只看得到起跑那一瞬間的數字。
+  useEffect(() => {
+    if (!translating) return;
+    const timer = setInterval(() => {
+      const session = sessionRef.current;
+      if (session) setStats({ ...session.stats });
+    }, 400);
+    return () => clearInterval(timer);
+  }, [translating]);
+
+  // 「完成 0」在畫面上跟「壞掉了」長得一模一樣，所以找到了段落卻一段都沒翻時，
+  // 一定要講出原因。中文 PDF 全部被跳過是**正確行為**（zh→zh-Hant 沒有東西可翻），
+  // 但不講的話使用者只會看到一個不動的 0。
+  const skipReason = (() => {
+    if (!stats || stats.done > 0 || stats.found === 0) return '';
+    const reasons: string[] = [];
+    if (stats.skippedChinese > 0) reasons.push(`已經是中文 ${stats.skippedChinese} 段`);
+    if (stats.skippedDetect > 0) reasons.push(`非英日文 ${stats.skippedDetect} 段`);
+    if (stats.skippedPack > 0) {
+      const packs = Object.entries(stats.availability).map(([pair, state]) => `${pair} ${state}`).join('、');
+      reasons.push(`語言包未就緒 ${stats.skippedPack} 段（${packs}）`);
+    }
+    if (reasons.length === 0) return '';
+    return `找到 ${stats.found} 段，但都沒有送進引擎——${reasons.join('、')}。`;
+  })();
+
+  const takeFile = useCallback((file: File) => {
     if (file.size > MAX_PDF_BYTES) {
       setStatus({ phase: 'error',
         message: `檔案過大（${(file.size / 1048576).toFixed(0)} MB，上限 ${MAX_PDF_BYTES / 1048576} MB）。` });
       return;
     }
-    void load({ kind: 'data', data: await file.arrayBuffer() }, file.name, null);
+    void load({ kind: 'file', file }, file.name, null);
   }, [load]);
 
   const onDrop = useCallback((e: React.DragEvent) => {
@@ -122,10 +227,6 @@ function App() {
     const f = e.dataTransfer.files?.[0];
     if (f) void takeFile(f);
   }, [takeFile]);
-
-  const totalItems = loaded?.pages.reduce((a, p) => a + p.items.length, 0) ?? 0;
-  const totalChars = loaded?.pages.reduce(
-    (a, p) => a + p.items.reduce((b, i) => b + i.str.length, 0), 0) ?? 0;
 
   return (
     <main style={S.main}
@@ -139,7 +240,10 @@ function App() {
           <div style={S.dim}>文字層抽取（5a 殼）。雙語渲染尚未接上。</div>
         </div>
         <div style={{ display: 'flex', gap: 8 }}>
-          <button style={S.btn} onClick={() => fileInput.current?.click()}>選擇 PDF 檔…</button>
+          {loaded && (translating
+            ? <button style={{ ...S.btn, ...S.btnGhost }} onClick={stopTranslation}>關閉翻譯</button>
+            : <button style={S.btn} onClick={startTranslation}>雙語翻譯這份 PDF</button>)}
+          <button style={{ ...S.btn, ...S.btnGhost }} onClick={() => fileInput.current?.click()}>選擇 PDF 檔…</button>
           {loaded?.sourceUrl && (
             // 逃生口：使用者永遠要能回到 Chrome 原生檢視器，不能被我們綁架
             <a style={{ ...S.btn, ...S.btnGhost }} href={loaded.sourceUrl}>回到原生檢視器</a>
@@ -167,35 +271,22 @@ function App() {
       )}
 
       {status.phase === 'ready' && loaded && (
-        <>
-          <section style={S.summary}>
-            <div><b>{loaded.title ?? loaded.name}</b></div>
-            <div style={S.dim}>
-              {loaded.numPages} 頁
-              {loaded.numPages > loaded.pages.length && `（本頁只抽前 ${loaded.pages.length} 頁）`}
-              ｜文字片段 {totalItems}｜字元 {totalChars}
-              ｜{totalItems > 0 ? '有文字層' : '沒有文字層（可能是掃描檔，本批不處理）'}
-            </div>
-          </section>
-          {loaded.pages.map((p) => (
-            <section key={p.pageNumber} style={S.page}>
-              <div style={S.pageHead}>
-                第 {p.pageNumber} 頁　{Math.round(p.width)}×{Math.round(p.height)}pt
-                　片段 {p.items.length}
-                　旋轉 {p.items.filter((i) => i.rotated).length}
-              </div>
-              <div style={S.raw}>
-                {p.items.slice(0, 60).map((i, k) => (
-                  <span key={k} style={S.chip} title={`x=${i.x.toFixed(1)} y=${i.y.toFixed(1)} h=${i.height.toFixed(1)}`}>
-                    {i.str}
-                  </span>
-                ))}
-                {p.items.length > 60 && <span style={S.dim}>…還有 {p.items.length - 60} 個片段</span>}
-              </div>
-            </section>
-          ))}
-        </>
+        <section style={S.summary}>
+          <div><b>{loaded.title ?? loaded.name}</b></div>
+          <div style={S.dim}>
+            {loaded.numPages} 頁
+            {loaded.numPages > loaded.pagesRead && `（本次讀取前 ${loaded.pagesRead} 頁）`}
+            ｜段落 {loaded.paragraphs.length}
+            {stats && `｜完成 ${stats.done}｜引擎呼叫 ${stats.engineCalls}｜快取命中 ${stats.cacheHits}`}
+            {stats && stats.failed > 0 && `｜失敗 ${stats.failed}`}
+          </div>
+          {statusLine && <div style={{ ...S.dim, marginTop: 4 }}>{statusLine}</div>}
+          {skipReason && <div style={{ ...S.dim, marginTop: 4 }}>{skipReason}</div>}
+        </section>
       )}
+
+      {/* 段落容器：交給下面的 effect 命令式填內容，React 不碰它的子節點 */}
+      <article ref={articleRef} style={S.article} />
     </main>
   );
 }
@@ -216,10 +307,7 @@ const S: Record<string, React.CSSProperties> = {
   error: { border: '1px solid #f0c2bd', background: '#fdf3f2', color: '#8c2f26',
            borderRadius: 8, padding: '14px 16px' },
   summary: { background: '#f6f8fb', borderRadius: 8, padding: '12px 14px', marginBottom: 18 },
-  page: { borderTop: '1px solid #eef1f5', paddingTop: 12, marginTop: 12 },
-  pageHead: { fontSize: 12, color: '#5c6675', marginBottom: 8 },
-  raw: { display: 'flex', flexWrap: 'wrap', gap: '4px 6px' },
-  chip: { background: '#f2f4f8', borderRadius: 4, padding: '1px 5px', fontSize: 13, whiteSpace: 'pre-wrap' },
+  article: { maxWidth: 760, font: '16px/1.8 system-ui, -apple-system, sans-serif' },
 };
 
 createRoot(document.getElementById('root')!).render(<App />);
