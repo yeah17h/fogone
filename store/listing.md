@@ -70,6 +70,8 @@ BYOK 模式下資料到的是你指定的那家供應商（那是你選的、你
 授權：AGPL-3.0
 
 隱私承諾不該只是一段文字。程式碼是公開的，上面那些說法你可以自己驗證。
+
+螢幕擷取畫面中的網頁內容來自 MDN Web Docs 與維基百科（CC BY-SA），影片為創用 CC 姓名標示授權。
 ```
 
 ---
@@ -83,11 +85,23 @@ BYOK 模式下資料到的是你指定的那家供應商（那是你選的、你
   - `screenshot-1-web.png`（MDN 英文技術文件雙語）
   - `screenshot-2-youtube.png`（YouTube 自動生成 CC 雙語，全螢幕）
   - `screenshot-3-popup.png`（擴充視窗＋零權限訴求）
-  - `screenshot-4-japanese.png`（Zenn 日文文章雙語）
+  - `screenshot-4-japanese.png`（日文維基百科條目雙語）
   - `promo-large-920x680.png`（選填）
-  - **送審前要決定的兩件事**：
-    1. 三張截圖含第三方網站內容（MDN、Zenn、YouTube 上一支 JSConf 演講）。
-       翻譯類擴充這樣做是慣例，但若要完全避開第三方素材的疑慮，
-       換成自有頁面或 CC 授權影片重跑即可（腳本的網址是常數，改一行）。
-    2. 視覺識別沿用**佔位圖示**的配色與 wordmark（BACKLOG #12 尚未完成）。
-       #12 做完後這批素材要重新產生，才不會出現「商店頁與擴充圖示長得不一樣」。
+
+### 截圖素材的第三方內容與授權
+
+**全部為 CC 授權來源**，換素材時必須維持這條線。
+
+| 素材 | 來源 | 授權 |
+|---|---|---|
+| `screenshot-1-web.png` | [MDN《Using the Fetch API》](https://developer.mozilla.org/en-US/docs/Web/API/Fetch_API/Using_Fetch) | CC BY-SA 2.5+ |
+| `screenshot-2-youtube.png` | [CS110 - Introduction to Computer Science - Lecture 1 - Fall 2017](https://www.youtube.com/watch?v=zE0WWgLWGEw)（頻道 meschian） | YouTube 授權欄位：創用 CC 姓名標示授權（允許再利用） |
+| `screenshot-4-japanese.png` | [日文維基百科「オープンソース」](https://ja.wikipedia.org/wiki/オープンソース) | CC BY-SA 4.0 |
+
+換 YouTube 影片時**一定要實際打開影片頁確認授權欄位寫的是創用 CC**——
+搜尋結果的 CC 篩選器會撈到轉載頻道自行標 CC 的內容，那不算數
+（實測踩過：搜尋結果前排有兩支是第三方轉載的 MIT 課程）。
+
+- **送審前還沒解決的一件事**：視覺識別沿用**佔位圖示**的配色與 wordmark
+  （BACKLOG #12 尚未完成）。#12 做完後這批素材要重新產生，
+  才不會出現「商店頁與擴充圖示長得不一樣」。

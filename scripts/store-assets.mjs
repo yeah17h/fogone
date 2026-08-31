@@ -34,6 +34,10 @@ const CHROME = '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
 const onlyArg = process.argv.find((a) => a.startsWith('--only='))?.split('=')[1];
 const doShots = onlyArg !== 'promos';
 const doPromos = onlyArg !== 'shots';
+// --shot=web|youtube|popup|japanese：只重跑其中一張。四張各自要開真 Chrome 跑幾十秒，
+// 調整版面時重跑全部很浪費，而且會讓其他三張暴露在語言包狀態跳動的風險下。
+const shotArg = process.argv.find((a) => a.startsWith('--shot='))?.split('=')[1];
+const wants = (name) => doShots && (!shotArg || shotArg === name);
 
 // 版面常數：合成圖 = 上方說明帶 + 下方 1:1 原始截圖，截圖不縮放（縮放會糊）
 const W = 1280, H = 800, BAND = 120, SHOT_H = H - BAND;
@@ -236,16 +240,31 @@ try {
       await page.waitForTimeout(2200);
     }
   };
-  const scrollToFirstTranslation = async (page, offset = 118, index = 0) => {
-    const ok = await page.evaluate(({ off, idx }) => {
-      const all = document.querySelectorAll('x-yi');
+  // 等譯文累積到 n 筆再動作。可視優先佇列在長條目（維基百科實測 915 個單元）上
+  // 需要時間，固定 sleep 會截到「只翻好兩段」的畫面。
+  const waitForTranslations = async (page, n, timeoutMs = 45000) => {
+    try {
+      await page.waitForFunction((k) => document.querySelectorAll('x-yi').length >= k,
+        n, { timeout: timeoutMs, polling: 500 });
+      return true;
+    } catch { return false; }
+  };
+  // minLen／skip：挑「像正文」的譯文當定位點。維基百科的第一個譯文可能是數學公式，
+  // 譯文會是 `{\displaystyle …}` 這種原始碼，當商店素材的主角很難看。
+  const scrollToFirstTranslation = async (page, offset = 118, index = 0, minLen = 0) => {
+    const ok = await page.evaluate(({ off, idx, min }) => {
+      const all = [...document.querySelectorAll('x-yi')].filter((e) => {
+        const own = (e.textContent ?? '').trim();
+        const src = e.parentElement?.textContent ?? '';
+        return own.length >= min && !/displaystyle|\\[a-z]{3,}/.test(src);
+      });
       const el = all[Math.min(idx, all.length - 1)];
       if (!el) return false;
       const unit = el.parentElement ?? el;
       const y = unit.getBoundingClientRect().top + window.scrollY - off;
       window.scrollTo({ top: Math.max(0, y), behavior: 'instant' });
       return true;
-    }, { off: offset, idx: index });
+    }, { off: offset, idx: index, min: minLen });
     await page.waitForTimeout(2500); // 捲動會帶出新段落，等它們翻完再截
     return ok;
   };
@@ -258,7 +277,7 @@ try {
 
   if (doShots) {
     // (1) 英文技術文件 → 繁中
-    try {
+    if (wants('web')) try {
       console.log('抓圖 1／4：英文網頁雙語…');
       claim('screenshot-1-web.png');
       const raw = path.join(TMP, 'web.png');
@@ -281,13 +300,18 @@ try {
     } catch (e) { failed.push(`screenshot-1-web: ${e.message}`); console.log('  ✗', e.message); }
 
     // (2) YouTube CC 雙語字幕
-    try {
+    if (wants('youtube')) try {
       console.log('抓圖 2／4：YouTube 字幕雙語…');
       claim('screenshot-2-youtube.png');
       const raw = path.join(TMP, 'youtube.png');
       const page = await newShotPage();
       try {
-      await page.goto('https://www.youtube.com/watch?v=8aGhZQkoFbQ', { waitUntil: 'domcontentloaded' });
+      // 影片來源必須是授權欄位明確標示 Creative Commons 的：商店素材會長期公開展示，
+      // 用一般授權的第三方影片等於拿別人的內容替自己宣傳。這支是講者本人上傳的
+      // CS110 課程，YouTube 授權欄位為「創用 CC 姓名標示授權（允許再利用）」，
+      // 且有英文自動產生字幕（正是我們要展示的最難情境）。
+      // 換片時要重新確認授權欄位——轉載頻道自行標 CC 不算數。
+      await page.goto('https://www.youtube.com/watch?v=zE0WWgLWGEw', { waitUntil: 'domcontentloaded' });
       await page.waitForTimeout(4500);
       for (const sel of ['button[aria-label*="Accept"]', 'button:has-text("Accept all")', 'button:has-text("全部接受")']) {
         try {
@@ -295,10 +319,12 @@ try {
           if (await l.count() && await l.isVisible()) { await l.click({ timeout: 2000 }); await page.waitForTimeout(1500); break; }
         } catch {}
       }
-      // 跳到演講中段：開頭是掌聲與寒暄，字幕內容零碎，翻出來看不出價值
+      // 跳到演講中段：開頭是掌聲、寒暄與課程說明，字幕零碎（實測 240s 抓到
+      // "heard of amazon.com okay the guy from amazon.com he" 這種半句），
+      // 翻出來看不出價值。往後跳到真正在講內容的段落。
       await page.evaluate(() => {
         const v = document.querySelector('video');
-        if (v) { v.currentTime = 240; v.play?.().catch(() => {}); }
+        if (v) { v.currentTime = 1500; v.play?.().catch(() => {}); }
       });
       await page.waitForTimeout(2000);
       // 開字幕，優先選自動生成那一軌（那才是賣點：沒有乾淨 cue 邊界也翻得動）
@@ -352,7 +378,7 @@ try {
         const prev = window.__yiShotPrev;
         const stableSince = prev && prev.src === src && prev.zh === zh ? prev.t : Date.now();
         window.__yiShotPrev = { src, zh, t: stableSince };
-        if (src.length < 45 || zh.length < 12) return false;
+        if (src.length < 60 || zh.length < 16) return false;
         return Date.now() - stableSince >= 500;
       }, null, { timeout: 60000, polling: 200 })
         .catch(() => { throw new Error('等不到「原文夠長且譯文已跟上」的穩定畫面（60s）'); });
@@ -366,7 +392,7 @@ try {
     } catch (e) { failed.push(`screenshot-2-youtube: ${e.message}`); console.log('  ✗', e.message); }
 
     // (3) 擴充視窗 UI
-    try {
+    if (wants('popup')) try {
       console.log('抓圖 3／4：擴充視窗…');
       claim('screenshot-3-popup.png');
       const id = await extensionId();
@@ -405,30 +431,44 @@ try {
     } catch (e) { failed.push(`screenshot-3-popup: ${e.message}`); console.log('  ✗', e.message); }
 
     // (4) 日文站雙語
-    try {
+    if (wants('japanese')) try {
       console.log('抓圖 4／4：日文網頁雙語…');
       claim('screenshot-4-japanese.png');
       const raw = path.join(TMP, 'japanese.png');
       const page = await newShotPage();
       try {
-      await page.goto('https://zenn.dev/', { waitUntil: 'domcontentloaded' });
-      await page.waitForTimeout(2500);
-      // 首頁是卡片牆，翻起來看不出「整篇對照」；點進第一篇文章。
-      // 比對必須是「/<作者>/articles/<slug>」的完整形狀：只找 '/articles/' 會撈到
-      // /articles/explore 這種列表頁，截出來仍是卡片牆（實測踩過）。
-      const href = await page.evaluate(() => {
-        const a = [...document.querySelectorAll('a[href*="/articles/"]')]
-          .find((x) => /^https:\/\/zenn\.dev\/[^/]+\/articles\/[^/?#]+$/.test(x.href));
-        return a ? a.href : null;
-      });
-      if (href) { await page.goto(href, { waitUntil: 'domcontentloaded' }); await page.waitForTimeout(3000); }
+      // 日文維基百科：內容為 CC BY-SA 4.0，來源授權明確，且是連續的長段正文
+      // ——比技術部落格更適合展示「整篇對照」。直接指定條目，不做站內找連結，
+      // 少一個會隨版面改動而失效的環節。
+      // 挑沒有數學公式的條目：有公式的條目（機械学習實測）第一批譯文會是
+      // `{\displaystyle …}` 的公式原始碼，畫面很難看。
+      const href = 'https://ja.wikipedia.org/wiki/オープンソース';
+      await page.goto(href, { waitUntil: 'domcontentloaded' });
+      await page.waitForTimeout(3000);
       await dismiss(page);
+      // 收掉維基百科的「外觀」側欄，讓正文佔更多版面（點的是站方自己的收合鈕，不是改版面）
+      try {
+        const hide = page.locator('#vector-appearance a:has-text("非表示"), #vector-appearance button:has-text("非表示")').first();
+        if (await hide.count()) { await hide.click({ timeout: 2000 }); await page.waitForTimeout(800); }
+      } catch {}
       await translate(page);
       await page.waitForTimeout(4500);
       await warmScroll(page);
-      // index=1：跳過標題那一對，對齊正文——標題配對很好看，但整個畫面會有一半是留白，
+      console.log('  等譯文累積…', await waitForTranslations(page, 8) ? '達 8 筆' : '逾時（用現有的截）');
+      // 失敗時把語言包狀態一起講出來：實測踩過一次 ja→zh-Hant 暫時回報 downloadable，
+      // 於是日文全被跳過、只翻到頁面上零星的英文。光看「沒有譯文」查不出這件事。
+      const st = await page.evaluate(() => new Promise((res) => {
+        const t = setTimeout(() => res(null), 3000);
+        window.addEventListener('message', function h(e) {
+          if (e.data?.yi === 'stats:result') { clearTimeout(t); window.removeEventListener('message', h); res(e.data.stats); }
+        });
+        window.postMessage({ yi: 'stats' }, '*');
+      }));
+      const why = st ? `（found=${st.found} done=${st.done} skippedPack=${st.skippedPack}`
+        + ` availability=${JSON.stringify(st.availability)}）` : '';
+      // 對齊「夠長的正文譯文」：標題配對很好看，但整個畫面會有一半是留白，
       // 正文段落連續成對才看得出「整篇對照」是什麼樣子
-      needed(await scrollToFirstTranslation(page, 118, 1), '頁面上沒有任何譯文（<x-yi>），擴充可能沒生效');
+      needed(await scrollToFirstTranslation(page, 118, 1, 40), `頁面上沒有夠長的正文譯文${why}`);
       await page.screenshot({ path: raw });
       console.log('  x-yi =', await page.locator('x-yi').count(), '｜', href ?? 'zenn.dev 首頁');
       } finally { await page.close().catch(() => {}); }
