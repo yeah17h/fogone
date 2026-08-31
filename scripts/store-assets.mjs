@@ -4,7 +4,7 @@
 // 產出（store/assets/）：
 //   screenshot-1-web.png        1280×800  整頁雙語（英文站）
 //   screenshot-2-youtube.png    1280×800  YouTube CC 雙語字幕
-//   screenshot-3-popup.png      1280×800  擴充視窗 UI（零權限訴求）
+//   screenshot-3-popup.png      1280×800  擴充視窗 UI（權限範圍訴求）
 //   screenshot-4-japanese.png   1280×800  日文站雙語
 //   promo-small-440x280.png     440×280   小型宣傳圖（後台必填）
 //   promo-large-920x680.png     920×680   大型宣傳圖（選填）
@@ -417,9 +417,9 @@ try {
             <div style="max-width:520px">
               ${wordmark(46)}
               <div style="font:600 20px/1.5 ${FONT};color:#B9CBE6;margin:6px 0 26px">幾個譯思</div>
-              <div style="font:700 34px/1.35 ${FONT};color:#fff">零權限、零遙測</div>
-              <div style="font:400 18px/1.85 ${FONT};color:#C8D6EA;margin-top:16px">
-                安裝時你會看到：這個擴充要求的權限是空的。<br>
+              <div style="font:700 34px/1.35 ${FONT};color:#fff">只讀你正在看的網頁</div>
+              <div style="font:400 17px/1.8 ${FONT};color:#C8D6EA;margin-top:16px">
+                不讀書籤、歷史、分頁、下載，<br>沒有背景權限。<br>
                 翻譯由 Chrome 內建的裝置端模型完成，<br>文字從未離開你的瀏覽器。
               </div>
               <div style="font:400 15px/1.6 ${FONT};color:${ACCENT};margin-top:22px">開源 · AGPL-3.0</div>
@@ -514,7 +514,7 @@ try {
           <div style="font:400 23px/2 ${FONT};color:#C8D6EA;margin-top:26px">
             <div>・整頁雙語對照，譯文加在原文下方</div>
             <div>・YouTube 字幕即時翻譯，含自動生成 CC</div>
-            <div>・零權限、零遙測、開源 AGPL-3.0</div>
+            <div>・不讀書籤、歷史、分頁；零遙測；開源 AGPL-3.0</div>
           </div>
         </div>`,
     });

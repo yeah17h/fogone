@@ -24,13 +24,21 @@
 
 ## 權限說明
 
-**`permissions`：空陣列。** 本擴充不要求任何 Chrome 權限 API。
+**先把最容易被誤讀的一點寫在前面**：`permissions` 是空陣列，但這**不等於**本擴充沒有
+主機存取權。`content_scripts` 的 `matches` 是 `<all_urls>`，在 Chrome 的權限模型裡
+**等同於取得所有網站的讀寫權**，安裝時也會顯示對應的警告；
+`chrome.permissions.getAll()` 實測回傳 `{ origins: ["<all_urls>"], permissions: [] }`。
+對外文案一律照這個事實描述，不得寫成「零權限」。
 
 | 項目 | 內容 | 為什麼需要 |
 |---|---|---|
-| `permissions` | `[]` | 不需要。翻譯用的是網頁平台本身的 `Translator` API，不是 Chrome 擴充權限。 |
-| `host_permissions` | 未宣告 | 同上。 |
-| content script `matches` | `<all_urls>` | 使用者可能在任何網站上想要雙語對照，無法事先列舉網域。 |
+| `permissions` | `[]` | 不要任何 `chrome.*` API 權限。翻譯用的是網頁平台本身的 `Translator` API。 |
+| `host_permissions` | 未宣告 | 不另外宣告，但**實際主機存取權來自下一列**——不是「沒有主機權限」。 |
+| content script `matches` | `<all_urls>` | 使用者可能在任何網站上想要雙語對照，無法事先列舉網域。**等效於全站讀寫。** |
+
+因此本擴充要求的權限範圍，用一句話講是：
+「除了翻譯所必需的『讀取你正在瀏覽的網頁內容』之外，不要求任何其他權限
+——不讀書籤、歷史、分頁、下載，沒有背景權限。」
 
 content script 的用途，一句話：
 
