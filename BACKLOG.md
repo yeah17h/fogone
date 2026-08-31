@@ -233,3 +233,58 @@
 - 免費版的呈現：進階功能以**鎖定態＋演示片段**呈現，讓使用者知道它存在、看得到它長什麼樣，
   而不是完全隱藏。不要做成惱人的升級彈窗。
 - **不得阻擋內測時程**：內測開門版不含此項，開門後再排。
+## #14 [P2] `Translator.availability()` 間歇性偽陰性（#8 那條「未證的尾巴」）
+- **現象**：語言包已經裝好、`create()` 立刻就能用，但網頁環境的
+  `Translator.availability({ja→zh-Hant})` 回報 `downloadable`。
+  content script 的閘門是 `availability === 'available'`（鐵律 5 的落地），
+  於是**整站日文被靜默跳過**：實測 `found=405 done=0 skippedPack=31`。
+  使用者只看到「這頁沒反應」，popup 也不會示警——因為 popup 在**擴充頁面**環境讀到的是 `available`。
+- **實測（2026-08-31，做商店素材時撞到）**：同一時刻、同一個 profile，
+  `create()+translate()` 在每個來源都成功（都翻出「這是一個測試。」），但 availability 回報不一致：
+
+  | 來源 | `ja→zh-Hant` |
+  |---|---|
+  | 擴充頁面 | `available` |
+  | ja.wikipedia.org | `downloadable` |
+  | developer.mozilla.org | `downloadable` |
+  | zenn.dev / example.com | `available` |
+
+  **而且會跳動**：約一分鐘後重測，ja.wikipedia.org 變 `available`，
+  原本正常的 ja.wikinews.org、ja.wikibooks.org 變 `downloadable`。
+  擴充頁面 `create()` 只花 **150ms** 就回來，證明語言包確實在磁碟上。
+- **這推翻了 #8 的結論範圍**：#8 把 `downloadable` 歸因於「全新安裝的安裝尾巴」，
+  但這台機器的語言包早就裝好了，而且症狀會來回跳動。
+  #8 的複測（連續三次全新 Chrome 都是 `available`）沒有錯，只是沒涵蓋這個情境。
+- **已知重現嘗試**：
+  - 用 popup 的啟用鈕重裝 → 當下 popup 讀到的已是 `available`，按鈕根本不出現，等於無從補救。
+  - 在擴充頁面強制 `create()` 一次（150ms 成功）→ **網頁環境仍持續回報 `downloadable` 超過 27 秒**，
+    不是「create 一次就好」那種暖機。
+  - 什麼都不做等一分鐘 → 有時自己恢復。**目前沒有可靠的重現步驟**，這是本項最大的障礙。
+- **觸發條件假設（都未證）**：(a) 全新安裝的安裝尾巴（#8 的原假設）；
+  (b) 語言包被系統清除後的重建期（見 beta-kit 觀察第 10 點）；
+  (c) 每個 browser session／每個來源各自初始化。
+  跳動的觀察對 (c) 較有利，但**不足以定論**。
+- **觀測方式**：統計列的語言包欄位（`availability` 與 `skippedPack`）。
+  這正是 #8 的防線留下來的價值——症狀出現時使用者看得到是哪一對卡住、卡在什麼狀態。
+  內測回報「日文頁沒翻」時，第一件事就是看統計列截圖的這兩個欄位。
+- **不擋任何批次**：防線（#8 已實作的逐對顯示）已在，最壞情況是使用者困惑而不是資料出錯。
+  修法方向牽涉鐵律 5 的邊界（content script 能不能在 `downloadable` 時直接 `create()`），
+  要動之前先把重現條件釘死，否則改了也不知道有沒有修好。
+- 相關：#8（原假設與已實作的防線）、beta-kit 觀察第 6 點（新安裝族群最可能復現）與第 10 點（語言包被清除）。
+
+## #15 [P1] M3 PDF 文字層雙語（5a 已完成）
+偵察報告：`docs/research/pdf-text-layer.md`。方案定案：手動入口＋重排閱讀模式。
+
+- **5a 檢視器殼**：✅ 已完成（commit `ed5cb74`）。
+- **5b 段落重建**：分帶中縫偵測、行尾接續（中英規則）、連字號、頁首頁尾去重、
+  旋轉文字剔除、公文編號前綴斷段、流程圖垃圾段落過濾。三份 PDF 建 fixture 進 Vitest。
+  驗收：雙欄中縫 ≥ 10/12 頁、公文 `(五)(六)` 正確分段、白皮書零垃圾段落進引擎、輸出接續率量測。
+- **5c 雙語渲染**：重排頁面走現有 scheduler／engine／cache，統計列增 PDF 欄位。
+  驗收：三份 PDF 雙語可讀、`done == engineCalls + cacheHits`。
+- **5d 收尾**：大檔效能（arXiv 12 頁流暢）、錯誤處理、`scripts/verify-pdf.mjs`。
+  - **錯誤訊息必須點名「網站存取權」設定**：使用者可在擴充選單把存取權改成
+    「點按時」或「特定網站」（chrome://extensions 詳細頁的三選一，實測文字為
+    「點按時／特定網站／所有網站」）。改成「點按時」之後檢視器抓 PDF 會失敗，
+    而瀏覽器只給得出 `TypeError: Failed to fetch` ——照抄那句話等於把使用者丟在原地。
+    訊息要直接說明是哪個設定、在哪裡改。
+- **自動接管（B 案）**：日後做成**預設關閉**的選項，不在本批。
