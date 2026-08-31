@@ -7,14 +7,18 @@
   "type": "module",
   "scripts": {
     "dev": "wxt",
+    "sync:pdfjs": "node scripts/sync-pdfjs-assets.mjs",
     "dev:firefox": "wxt -b firefox",
     "build": "wxt build",
     "build:test": "YI_TESTING=1 wxt build",
     "zip": "wxt zip",
     "compile": "tsc --noEmit",
-    "postinstall": "wxt prepare"
+    "postinstall": "wxt prepare",
+    "prebuild": "node scripts/sync-pdfjs-assets.mjs",
+    "prebuild:test": "node scripts/sync-pdfjs-assets.mjs"
   },
   "dependencies": {
+    "pdfjs-dist": "6.3.289",
     "react": "^19.0.0",
     "react-dom": "^19.0.0"
   },

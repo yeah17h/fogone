@@ -61,6 +61,27 @@ function App() {
 
   const [status, setStatus] = useState('');
 
+  // 目前分頁是不是 PDF？由 content script 回報（見 content.ts 的 yi:ping）。
+  // Chrome 內建 PDF 檢視器的 DOM 是空的，翻譯按鈕在那裡按了也沒用，
+  // 所以改為引導使用者進自家檢視器。
+  const [pdfUrl, setPdfUrl] = useState<string | null>(null);
+  useEffect(() => {
+    (async () => {
+      try {
+        const [tab] = await browser.tabs.query({ active: true, currentWindow: true });
+        if (tab?.id == null) return;
+        const res = await browser.tabs.sendMessage(tab.id, { type: 'yi:ping' });
+        if (res?.isPdf && typeof res.url === 'string') setPdfUrl(res.url);
+      } catch { /* 沒有 content script（chrome:// 或未重整的分頁）就當作不是 PDF */ }
+    })();
+  }, []);
+
+  const openInViewer = () => {
+    const viewer = browser.runtime.getURL('/viewer.html');
+    browser.tabs.create({ url: `${viewer}?url=${encodeURIComponent(pdfUrl!)}` });
+    window.close();
+  };
+
   const send = async (type: 'yi:translate' | 'yi:off') => {
     setStatus('');
     const [tab] = await browser.tabs.query({ active: true, currentWindow: true });
@@ -112,6 +133,16 @@ function App() {
   return (
     <main style={{ width: 260, padding: 14, font: '14px/1.6 system-ui', color: '#1c2330' }}>
       <h1 style={{ fontSize: 15, margin: '0 0 8px' }}>幾個譯思</h1>
+
+      {pdfUrl && (
+        <>
+          <p style={{ margin: '0 0 8px', color: '#5c6675' }}>
+            這是一份 PDF。Chrome 內建的檢視器不讓擴充讀到內容，
+            要雙語對照請用 Fogone 自己的檢視器開啟。
+          </p>
+          <button onClick={openInViewer} style={btn}>用 Fogone 開啟這份 PDF</button>
+        </>
+      )}
 
       {!hasAPI && (
         <p style={{ color: '#b3261e' }}>

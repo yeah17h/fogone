@@ -57,7 +57,16 @@ export default defineContentScript({
           return;
         }
         case 'yi:ping': {
-          sendResponse({ ok: true, active: session !== null });
+          // isPdf：Chrome 內建 PDF 檢視器裡 content script 進得去，但 DOM 是空的
+          // （實測 body 零子節點），所以無從翻譯。document.contentType 是零成本的
+          // 判別訊號，popup 靠它決定要不要顯示「用 Fogone 開啟這份 PDF」。
+          // 網址由這裡回報而不是讓 popup 讀 tab.url——少依賴一項權限來源。
+          sendResponse({
+            ok: true,
+            active: session !== null,
+            isPdf: document.contentType === 'application/pdf',
+            url: location.href,
+          });
           return;
         }
       }

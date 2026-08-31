@@ -154,3 +154,10 @@ types/builtin-ai.d.ts      Translator / LanguageDetector 的型別宣告
 或拿它架成別人可以透過網路使用的服務，那個版本也必須以相同的條款開源。
 選這個授權的理由跟這個專案的其他決定一致——隱私承諾要能被驗證，
 而能被驗證的前提是程式碼看得到；衍生版本也該維持同樣的可驗證性。
+
+### 第三方元件
+
+PDF 閱讀模式使用 **[PDF.js](https://github.com/mozilla/pdf.js)（`pdfjs-dist` 6.3.289，
+Apache-2.0，Copyright Mozilla Foundation and contributors）** 解析 PDF 文字層。
+版本鎖定、隨擴充打包，執行期不從遠端載入程式碼，也不新增任何對外連線。
+細節與升版程序見 [THIRD_PARTY.md](THIRD_PARTY.md)。
