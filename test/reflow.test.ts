@@ -15,10 +15,19 @@ const arxiv = load('arxiv-2col');
 const gov = load('gov-han');
 const whitepaper = load('whitepaper');
 
+// 合成輸入的建構子：真實 fixture 證明整體結果，合成輸入證明個別規則的邊界。
+const item = (o: Partial<PageText['items'][0]>) =>
+  ({ str: 'x', x: 0, y: 0, width: 10, height: 10, rotated: false, ...o });
+const page = (o: Partial<PageText>): PageText =>
+  ({ pageNumber: 1, width: 612, height: 792, items: [], ...o });
+
 describe('雙欄中縫偵測', () => {
-  it('ResNet 論文 12 頁中至少 10 頁偵測得到中縫', () => {
-    const hit = detectGutters(arxiv).filter((g) => g !== null).length;
-    expect(hit).toBeGreaterThanOrEqual(10);
+  it('雙欄論文每一頁都偵測得到中縫', () => {
+    // 這份 fixture（CC BY 4.0）通篇雙欄，沒有跨欄表格頁，所以標準是全中。
+    // 「跨欄頁不可誤判」的覆蓋改由下面的合成測試負責——那個性質不該綁在
+    // 某一篇論文剛好有沒有寬表格上。
+    const gutters = detectGutters(arxiv);
+    expect(gutters.filter((g) => g !== null).length).toBe(arxiv.length);
   });
 
   it('偵測到的中縫落在頁面中線附近（雙欄版面的實際位置）', () => {
@@ -36,11 +45,39 @@ describe('雙欄中縫偵測', () => {
   });
 
   it('雙欄頁不會出現左右欄互相插入的句子', () => {
-    // 天真做法（依 y 分行、不分欄）會產出
-    // "…accuracy gains with" + "ReLU [29] and the biases are omitted…" 這種跨欄亂接。
-    const paras = reflow(arxiv);
-    const glued = paras.filter((p) => /gains with\s*ReLU/.test(p.text));
-    expect(glued).toEqual([]);
+    // 天真做法（依 y 分行、不分欄）會把同一個 y 的左右欄併成一句。
+    // 用合成頁直接驗：左欄五行、右欄五行，共用同一組 y。
+    // 30 行不是隨便挑的：分帶偵測要求每條帶至少 8 個 item 才願意投票，
+    // 頁面太小湊不出證據就會回 null（那是刻意的保守，不是 bug）。
+    const rows = 30;
+    const pages = [page({ items: [
+      ...Array.from({ length: rows }, (_, i) =>
+        item({ x: 60, y: 700 - i * 12, width: 200, str: `left${i} sentence continues` })),
+      ...Array.from({ length: rows }, (_, i) =>
+        item({ x: 330, y: 700 - i * 12, width: 200, str: `right${i} sentence continues` })),
+    ] })];
+    const text = reflow(pages).map((p) => p.text).join('\n');
+    expect(text, '左右欄被交錯併行').not.toMatch(/left\d[^\n]*right\d/);
+    expect(text).toContain('left0');
+    expect(text).toContain('right0');
+  });
+
+  it('整頁寬的表格頁不會被套上文件中縫', () => {
+    // 文件層級共識會把中縫補給偵測不到的頁；跨欄的頁必須擋下來，
+    // 否則整頁寬的表格列會被從中間切開、順序也跟著亂掉。
+    const twoCol = (n: number) => page({ pageNumber: n, items: [
+      ...Array.from({ length: 30 }, (_, i) =>
+        item({ x: 60, y: 700 - i * 12, width: 200, str: `left ${i}` })),
+      ...Array.from({ length: 30 }, (_, i) =>
+        item({ x: 330, y: 700 - i * 12, width: 200, str: `right ${i}` })),
+    ] });
+    // 第三頁是跨欄的：每一行都是一整條橫跨中線的文字
+    const fullWidth = page({ pageNumber: 3, items: Array.from({ length: 30 }, (_, i) =>
+      item({ x: 60, y: 700 - i * 12, width: 470, str: `full width row ${i}` })) });
+    const gutters = detectGutters([twoCol(1), twoCol(2), fullWidth]);
+    expect(gutters[0]).not.toBeNull();
+    expect(gutters[1]).not.toBeNull();
+    expect(gutters[2], '跨欄頁被硬套上中縫').toBeNull();
   });
 });
 
@@ -83,8 +120,12 @@ describe('技術白皮書', () => {
   it('流程圖的並排標籤不會變成翻譯單元', () => {
     // 用**實際觀察到的**垃圾字串當判準，不要用泛用正則——泛用正則既會漏
     // （"ItemItem...":省略號讓它看起來像句子）也會誤傷正常段落。
+    // 兩種形態都要列：PDF 若不輸出空白字元就是黏在一起的樣子，
+    // 我們依間距補上空白之後就變成有空白的樣子。只擋一種等於沒擋。
     const known = ['TransactionTransaction', 'Hash0Hash1', 'Tx0Tx1',
-                   'IdentitiesTransactions', 'ItemItem', 'TxTx'];
+                   'IdentitiesTransactions', 'ItemItem', 'TxTx',
+                   'Transaction Transaction', 'Owner 1\'s Owner 2\'s',
+                   'Prev Hash Nonce Prev Hash Nonce', 'Tx Tx ... Tx Tx'];
     for (const k of known) {
       expect(text.filter((t) => t.includes(k)), `殘留垃圾段落：${k}`).toEqual([]);
     }
@@ -106,13 +147,14 @@ describe('技術白皮書', () => {
 describe('垃圾過濾不得誤傷正文', () => {
   // 迴歸測試：門檻設成「2 字元以上的詞重複」時，"COCO" 會被判成「CO 重複」，
   // 這三行正文因此被整行刪掉。任何調整垃圾規則的人都會先撞到這裡。
-  it('含 COCO 的正文不被當成重複標籤刪掉', () => {
-    const all = reflow(arxiv).map((p) => p.text).join('\n');
-    for (const fragment of [
-      'COCO object detection dataset',
-      'COCO 2015 competitions',
-      'COCO detection, and COCO segmentation',
-    ]) expect(all, `正文被誤刪：${fragment}`).toContain(fragment);
+  it('字內含重複音節的正文不被當成重複標籤刪掉', () => {
+    // "COCO" 是 "CO" 重複兩次。重複規則的單位門檻若放到 2 個字元，
+    // 整行正文會被當標籤刪掉（實測在舊 fixture 上誤刪 3 行）。
+    const pages = [page({ items: [
+      item({ x: 60, y: 700, width: 300, str: 'improvement on the COCO object detection dataset' }),
+    ] })];
+    expect(reflow(pages).map((p) => p.text))
+      .toEqual(['improvement on the COCO object detection dataset']);
   });
 
   it('座標軸刻度之類的純數字行不進引擎', () => {
@@ -123,9 +165,17 @@ describe('垃圾過濾不得誤傷正文', () => {
 
 describe('英文斷字與接續', () => {
   it('行尾連字號被接回成完整單字', () => {
-    const paras = reflow(arxiv).map((p) => p.text);
-    // 接對的話不會留下「連字號後面接空白」的殘跡
-    expect(paras.filter((t) => /[a-z]-\s[a-z]/.test(t))).toEqual([]);
+    // 這份 fixture 裡 "relation-" / "distinguish-" / "discrimina-" 都跨行斷字。
+    const all = reflow(arxiv).map((p) => p.text).join('\n');
+    for (const word of ['relationships', 'distinguishing', 'discriminative']) {
+      expect(all, `斷字沒有接回：${word}`).toContain(word);
+    }
+  });
+
+  it('懸空連字號（pose- and skeleton-based）不會被吃掉', () => {
+    // 這是正確的英文，不是斷字。一律吃掉連字號會把它變成 "poseand"。
+    const all = reflow(arxiv).map((p) => p.text).join('\n');
+    expect(all).toContain('pose- and skeleton-based');
   });
 
   it('中日文接續不補空格', () => {
@@ -151,10 +201,6 @@ describe('行尾接續率（診斷指標，不是門檻）', () => {
 // 真實 PDF 的 fixture 證明「整體結果對」，但證不了個別規則的邊界；
 // 而且「斷言某個壞字串不存在」在規則寫錯的方向上會假性通過。
 // 以下每一則都對應一個具體的錯誤輸入。
-const item = (o: Partial<PageText['items'][0]>) =>
-  ({ str: 'x', x: 0, y: 0, width: 10, height: 10, rotated: false, ...o });
-const page = (o: Partial<PageText>): PageText =>
-  ({ pageNumber: 1, width: 612, height: 792, items: [], ...o });
 
 describe('邊界輸入', () => {
   it('壞掉的頁面尺寸不會讓整份文件開不起來', () => {
@@ -184,7 +230,8 @@ describe('邊界輸入', () => {
 
   it('同一基線的片段不會因為捨入邊界被拆開', () => {
     const pages = [page({ items: [
-      item({ y: 100.49, x: 0, str: 'trans' }), item({ y: 100.51, x: 30, str: 'lation' }),
+      item({ y: 100.49, x: 0, width: 25, str: 'trans' }),
+      item({ y: 100.51, x: 25, width: 30, str: 'lation' }),
     ] })];
     expect(reflow(pages).map((p) => p.text)).toEqual(['translation']);
   });

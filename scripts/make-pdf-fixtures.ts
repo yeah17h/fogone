@@ -19,8 +19,12 @@ const OUT = path.join(ROOT, 'test/fixtures');
 
 /** 三份測試文件。挑選理由見 docs/research/pdf-text-layer.md。 */
 const SOURCES = [
-  { name: 'arxiv-2col', url: 'https://arxiv.org/pdf/1512.03385',
-    note: 'ResNet 論文：雙欄，含跨欄表格與圖' },
+  // 授權是選材的硬條件：fixture 會隨公開 repo 一起散布。
+  // 原本用的 ResNet 論文（1512.03385）是 arXiv 非專屬散布授權
+  // （arxiv.org/licenses/nonexclusive-distrib/1.0/），那只授權 arXiv 散布，
+  // 不授權第三方轉散布，因此換成 CC BY 4.0 的論文。
+  { name: 'arxiv-2col', url: 'https://arxiv.org/pdf/2608.27879v1',
+    note: '雙欄論文（CC BY 4.0，arXiv:2608.27879v1）' },
   { name: 'gov-han', url: 'https://www.archives.gov.tw/wSite/public/Attachment/0/f1716447937805.pdf',
     note: '中文公文：直排裝訂線、條目編號、寬行距' },
   { name: 'whitepaper', url: 'https://bitcoin.org/bitcoin.pdf',

@@ -129,6 +129,17 @@ export function detectGutters(pages: readonly PageText[]): (number | null)[] {
   });
 }
 
+/**
+ * 一道縫要多寬才算「欄距」而不是「字距」。
+ *
+ * 12pt 的幾何理由：本文字級約 10pt，字距落在 1.5~6pt（實測行內間距分布），
+ * 而欄距至少要能放下版面留白，實測雙欄論文的欄距是 15pt 以上
+ * （中縫偵測本身也用 15pt 當最小寬度）。12 取在兩者之間，
+ * 偏向「寧可判成跨欄」——誤判成跨欄只是少分一次欄，
+ * 誤判成雙欄卻會把整頁的閱讀順序打亂。
+ */
+const COLUMN_GAP_MIN_PT = 12;
+
 /** 中縫落在這一行的文字上（而不是落在欄與欄之間的空隙）＝這行是跨欄的。 */
 function crossesAt(line: readonly TextItem[], gutter: number): boolean {
   const sorted = [...line].sort((a, b) => a.x - b.x);
@@ -140,7 +151,7 @@ function crossesAt(line: readonly TextItem[], gutter: number): boolean {
     const gapStart = it.x + it.width;
     if (gapStart <= gutter && next.x >= gutter) {
       // 中縫落在兩個 item 之間：夠寬才算欄距，窄縫代表文字其實是連續的
-      return next.x - gapStart < 12;
+      return next.x - gapStart < COLUMN_GAP_MIN_PT;
     }
   }
   return false;
@@ -164,8 +175,12 @@ function bodyItems(page: PageText): TextItem[] {
 type Line = {
   y: number;
   text: string;
-  /** 行內相鄰 item 之間最大的水平空隙。並排標籤會很大，正常行文只有字距。 */
-  gapMax: number;
+  /**
+   * 行內「寬到不可能是字距」的空隙有幾個。
+   * 並排標籤是三個以上的方塊，所以有兩個以上；
+   * 「編號 ＋ 大空隙 ＋ 標題」這種章節標題只有一個。
+   */
+  wideGaps: number;
 };
 
 /**
@@ -194,15 +209,33 @@ function groupByBaseline(items: readonly TextItem[]): TextItem[][] {
 /** 把 item 併成行；同一行內依 x 排序後直接相接。 */
 function toLines(items: readonly TextItem[]): Line[] {
   const lines: Line[] = [];
+  const unit = modal(items.map((i) => i.height)) || 10;
   for (const group of groupByBaseline(items)) {
     const sorted = [...group].sort((a, b) => a.x - b.x);
-    const text = sorted.map((i) => i.str).join('').replace(/\s+/g, ' ').trim();
-    if (!text) continue;
-    let gapMax = 0;
-    for (let i = 0; i < sorted.length - 1; i++) {
-      gapMax = Math.max(gapMax, sorted[i + 1].x - (sorted[i].x + sorted[i].width));
+    // **不能無條件用空字串串接**：有些 PDF 完全不輸出空白字元，詞與詞之間
+    // 只用座標間距表示（實測 arXiv:2608.27879 整篇如此）。直接串接會得到
+    // "Articulatedhumanposeprovidesdetailed…"，那是沒辦法翻譯的東西。
+    // 依間距補空白；CJK 之間本來就不該有空白，所以兩側只要有一邊是 CJK 就不補。
+    // 門檻 0.1×字高是量出來的：實測行內間距呈雙峰，字內間距集中在 0pt（803 筆中 301 筆），
+    // 詞距落在 1.5~6pt，谷底在 0.5~1.5pt 之間。取 1.0pt（字高 10pt）落在谷裡。
+    let text = '';
+    let wideGaps = 0;
+    for (let i = 0; i < sorted.length; i++) {
+      const cur = sorted[i];
+      if (i > 0) {
+        const prev = sorted[i - 1];
+        const gap = cur.x - (prev.x + prev.width);
+        if (gap > unit * 1.5) wideGaps++;
+        const needsSpace = gap > unit * 0.1
+          && !/\s$/.test(text) && !/^\s/.test(cur.str)
+          && !CJK.test(text.slice(-1)) && !CJK.test(cur.str[0] ?? '');
+        if (needsSpace) text += ' ';
+      }
+      text += cur.str;
     }
-    lines.push({ y: sorted[0].y, text, gapMax });
+    text = text.replace(/\s+/g, ' ').trim();
+    if (!text) continue;
+    lines.push({ y: sorted[0].y, text, wideGaps });
   }
   return lines;
 }
@@ -236,7 +269,7 @@ const WORD_HYPHEN_END = /[A-Za-z][-‐‑]$/;
  * 特徵是同一個詞在同一行連續重複——那是三個並排方塊，不是句子。
  * 只認「緊鄰重複」，避免誤殺正常行文裡分散出現的重複詞。
  */
-function isRepeatedLabels(line: Line, unit: number): boolean {
+function isRepeatedLabels(line: Line): boolean {
   const text = line.text;
   // 完全沒有文字的行（座標軸刻度 "0123456"、"2020"）沒有東西可翻，
   // 送進引擎純粹浪費。用 \p{L} 而不是 [a-z]：後者會把韓文、希臘文、
@@ -247,20 +280,22 @@ function isRepeatedLabels(line: Line, unit: number): boolean {
   // 與 "TxTx...TxTx..." 都是流程圖標籤，卻因為省略號裡的點而被整條規則短路放行。
   // 改成認真正的句末形狀——兩個字母＋標點＋空白或結尾。
   if (/[a-z]{2}[.!?](\s|$)/.test(text)) return false;
-  // 同一個 4 字元以上的詞緊接著自己重複 ≥1 次（AA、AAA…）。
-  // **4 而不是 2**：門檻放到 2 會把 "COCO" 判成「CO 重複」，於是
-  // "improvement on the COCO object detection dataset." 這種正文被當垃圾刪掉
-  // （實測誤刪 3 行正文）。短標籤（"TxTx..."）交給下面的黏連規則接手。
-  if (/\b(\w{4,}(?:\s\w+)?)\1/.test(text)) return true;
-  // 「黏連點」：小寫或數字後面直接接大寫，代表本該有空白的地方沒有空白，
-  // 例如 "Hash0Hash1Hash2Hash3"、"IdentitiesTransactionsPublic"。
+
+  // 判準一（主要，結構）：行內有兩個以上「寬到不可能是字距」的空隙，
+  // 代表這一行其實是三個以上並排的方塊被依 y 併起來的。
   //
-  // **但光看黏連點會誤殺正常文字**："macOS supports iOS through watchOS"
-  // 有三個黏連點卻是正常句子。所以要再加一個**結構**條件：
-  // 這一行的 item 之間有大到不可能是字距的空隙——那是三個並排方塊
-  // 被依 y 併成一行的痕跡。正常行文的 item 是相鄰的。
-  const glue = text.match(/[a-z0-9]['\u2019]?[A-Z]/g)?.length ?? 0;
-  return glue >= 2 && line.gapMax > unit * 1.5;
+  // **結構訊號才是可靠的那個。** 原本靠「黏連點」這種詞法特徵，
+  // 在補上詞距空白之後就整個失效了——"TransactionTransactionTransaction"
+  // 變成 "Transaction Transaction Transaction"，同一批垃圾換個形態全部復活。
+  // 版面幾何不會因為文字怎麼串接而改變。
+  //
+  // 門檻是「兩個」不是「一個」：只有一個大空隙的是「編號 ＋ 標題」那種章節標題
+  // （實測用一個就會把白皮書的 "1. Introduction" 整批刪掉）。
+  if (line.wideGaps >= 2) return true;
+
+  // 判準二（補漏，詞法）：同一個詞（或同一組兩個詞）連續重複。
+  // 並排方塊若剛好靠得很近、湊不到空隙門檻，這條接得住。
+  return /\b(\w{3,}(?:\s+\w+)?)(?:\s+|)\1\b/.test(text);
 }
 
 /** 比對頁首頁尾用的正規化：頁碼會變動，數字一律換成 #。 */
@@ -331,10 +366,9 @@ export function reflow(pages: readonly PageText[]): Paragraph[] {
   const out: Paragraph[] = [];
   for (const [index, page] of pages.entries()) {
     const gutter = gutters[index];
-    const unit = modal(bodyItems(page).map((i) => i.height)) || 10;
     const lines = orderedLines(page, gutter)
       .filter((l) => !chrome.has(normKey(l.text)))
-      .filter((l) => !isRepeatedLabels(l, unit));
+      .filter((l) => !isRepeatedLabels(l));
     if (lines.length === 0) continue;
 
     // 斷段門檻用**眾數行距**，不用字高：中文公文行距 21pt、字高 14pt，
