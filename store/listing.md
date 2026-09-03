@@ -78,7 +78,17 @@ BYOK 模式下資料到的是你指定的那家供應商（那是你選的、你
 
 隱私承諾不該只是一段文字。程式碼是公開的，上面那些說法你可以自己驗證。
 
-螢幕擷取畫面中的網頁內容來自 MDN Web Docs 與維基百科（CC BY-SA），影片為創用 CC 姓名標示授權。
+【螢幕擷取畫面的內容來源】
+
+・「Using the Fetch API」by Mozilla Contributors，授權 CC BY-SA 2.5
+  https://developer.mozilla.org/en-US/docs/Web/API/Fetch_API/Using_Fetch
+・維基百科條目「オープンソース」，授權 CC BY-SA 4.0
+  https://ja.wikipedia.org/wiki/オープンソース
+・「CS110 - Introduction to Computer Science - Lecture 1 - Fall 2017」by meschian，
+  授權 創用 CC 姓名標示（允許再利用）
+  https://www.youtube.com/watch?v=zE0WWgLWGEw
+
+以上畫面均經修改：疊加本擴充產生的中文譯文，並加上標題橫幅。
 ```
 
 ---
@@ -97,17 +107,46 @@ BYOK 模式下資料到的是你指定的那家供應商（那是你選的、你
 
 ### 截圖素材的第三方內容與授權
 
-**全部為 CC 授權來源**，換素材時必須維持這條線。
+**全部為 CC 授權來源或自有素材**，換素材時必須維持這條線。
 
-| 素材 | 來源 | 授權 |
-|---|---|---|
-| `screenshot-1-web.png` | [MDN《Using the Fetch API》](https://developer.mozilla.org/en-US/docs/Web/API/Fetch_API/Using_Fetch) | CC BY-SA 2.5+ |
-| `screenshot-2-youtube.png` | [CS110 - Introduction to Computer Science - Lecture 1 - Fall 2017](https://www.youtube.com/watch?v=zE0WWgLWGEw)（頻道 meschian） | YouTube 授權欄位：創用 CC 姓名標示授權（允許再利用） |
-| `screenshot-4-japanese.png` | [日文維基百科「オープンソース」](https://ja.wikipedia.org/wiki/オープンソース) | CC BY-SA 4.0 |
+| 素材 | 內容來源 | 授權 | 最後產生 |
+|---|---|---|---|
+| `screenshot-1-web.png` | [MDN《Using the Fetch API》](https://developer.mozilla.org/en-US/docs/Web/API/Fetch_API/Using_Fetch) | CC BY-SA 2.5 或更新版本 | `3d2497a` |
+| `screenshot-2-youtube.png` | [CS110 Lecture 1（頻道 meschian）](https://www.youtube.com/watch?v=zE0WWgLWGEw) | 創用 CC 姓名標示（允許再利用） | `a1a7d29` |
+| `screenshot-3-popup.png` | 本擴充自己的 popup 介面 | 自有 | `6a77bcd` |
+| `screenshot-4-japanese.png` | [日文維基百科「オープンソース」](https://ja.wikipedia.org/wiki/オープンソース) | CC BY-SA 4.0 | `a1a7d29` |
+| `promo-small-440x280.png` | 純版面，無第三方內容 | 自有 | `6a77bcd` |
+| `promo-large-920x680.png` | 純版面，無第三方內容 | 自有 | `6a77bcd` |
 
-換 YouTube 影片時**一定要實際打開影片頁確認授權欄位寫的是創用 CC**——
-搜尋結果的 CC 篩選器會撈到轉載頻道自行標 CC 的內容，那不算數
-（實測踩過：搜尋結果前排有兩支是第三方轉載的 MIT 課程）。
+`screenshot-1-web.png` 的「最後產生」停在第一個 commit，是因為 MDN 是**保留**的來源：
+換源那一輪重跑後位元組完全相同，git 因此沒有記錄變更。內容確實是 CC 授權來源。
+
+### 標註要求（2026-09-03 補正）
+
+原本只寫一句「內容來自 MDN 與維基百科（CC BY-SA）」，**那不符合這兩個授權實際要求的標註**。
+MDN 明文要求：文件標題、指向該頁的超連結、修改說明，以及署名「Mozilla Contributors」；
+CC BY-SA 4.0 同樣要求署名、授權連結與變更聲明。詳細說明裡的
+【螢幕擷取畫面的內容來源】區塊已依此改寫，換素材時要一起改。
+
+**截圖都是經過修改的**（疊上我們產生的譯文、加上標題橫幅），所以「經修改」這句不能省。
+
+### 換素材時的兩條規矩
+
+1. 換 YouTube 影片**一定要實際打開影片頁確認授權欄位寫的是創用 CC**——
+   搜尋結果的 CC 篩選器會撈到轉載頻道自行標 CC 的內容，那不算數
+   （實測踩過：搜尋結果前排有兩支是第三方轉載的 MIT 課程）。
+2. 授權會變。上傳者隨時可以把 CC 改回標準授權，頁面也可能下架。
+   送審前重驗一次，別依賴這份表格上次查證的結果。
+
+### 未決：ShareAlike 對商店素材的效力（需要你判斷）
+
+MDN 與維基百科都是 **BY-SA**（相同方式分享）。截圖是「重製」還是「改作」在法律上有模糊地帶：
+若被視為改作，ShareAlike 理論上會要求該衍生素材也以 CC BY-SA 釋出——
+而商店素材通常不會這樣標。實務上翻譯類擴充普遍這樣用，風險低，但**這是判斷不是事實**。
+
+要完全沒有這層模糊，唯一乾淨的做法是把兩張截圖換成
+**自有頁面或公有領域／CC0 來源**（YouTube 那張是 CC BY，沒有 SA，不受影響）。
+成本是重跑一次 `node scripts/store-assets.mjs`。要不要做由你決定。
 
 - **送審前還沒解決的一件事**：視覺識別沿用**佔位圖示**的配色與 wordmark
   （BACKLOG #12 尚未完成）。#12 做完後這批素材要重新產生，
