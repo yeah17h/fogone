@@ -80,13 +80,14 @@ BYOK 模式下資料到的是你指定的那家供應商（那是你選的、你
 
 【螢幕擷取畫面的內容來源】
 
-・「Using the Fetch API」by Mozilla Contributors，授權 CC BY-SA 2.5
-  https://developer.mozilla.org/en-US/docs/Web/API/Fetch_API/Using_Fetch
-・維基百科條目「オープンソース」，授權 CC BY-SA 4.0
-  https://ja.wikipedia.org/wiki/オープンソース
+・NASA「Black Holes」（美國政府作品，公有領域）
+  https://science.nasa.gov/universe/black-holes/
+  NASA 未以任何形式為本擴充背書。
 ・「CS110 - Introduction to Computer Science - Lecture 1 - Fall 2017」by meschian，
   授權 創用 CC 姓名標示（允許再利用）
   https://www.youtube.com/watch?v=zE0WWgLWGEw
+・ウィキニュース「ネアンデルタール人のゲノム断片の解読と解析に成功」，授權 CC BY 4.0
+  https://ja.wikinews.org/wiki/ネアンデルタール人のゲノム断片の解読と解析に成功
 
 以上畫面均經修改：疊加本擴充產生的中文譯文，並加上標題橫幅。
 ```
@@ -107,46 +108,50 @@ BYOK 模式下資料到的是你指定的那家供應商（那是你選的、你
 
 ### 截圖素材的第三方內容與授權
 
-**全部為 CC 授權來源或自有素材**，換素材時必須維持這條線。
+**全部為公有領域、CC BY（無 ShareAlike）或自有素材。**
 
-| 素材 | 內容來源 | 授權 | 最後產生 |
-|---|---|---|---|
-| `screenshot-1-web.png` | [MDN《Using the Fetch API》](https://developer.mozilla.org/en-US/docs/Web/API/Fetch_API/Using_Fetch) | CC BY-SA 2.5 或更新版本 | `3d2497a` |
-| `screenshot-2-youtube.png` | [CS110 Lecture 1（頻道 meschian）](https://www.youtube.com/watch?v=zE0WWgLWGEw) | 創用 CC 姓名標示（允許再利用） | `a1a7d29` |
-| `screenshot-3-popup.png` | 本擴充自己的 popup 介面 | 自有 | `6a77bcd` |
-| `screenshot-4-japanese.png` | [日文維基百科「オープンソース」](https://ja.wikipedia.org/wiki/オープンソース) | CC BY-SA 4.0 | `a1a7d29` |
-| `promo-small-440x280.png` | 純版面，無第三方內容 | 自有 | `6a77bcd` |
-| `promo-large-920x680.png` | 純版面，無第三方內容 | 自有 | `6a77bcd` |
+| 素材 | 內容來源 | 授權 |
+|---|---|---|
+| `screenshot-1-web.png` | [NASA Science《Black Holes》](https://science.nasa.gov/universe/black-holes/) | 美國政府作品，**公有領域** |
+| `screenshot-2-youtube.png` | [CS110 Lecture 1（頻道 meschian）](https://www.youtube.com/watch?v=zE0WWgLWGEw) | 創用 CC 姓名標示（**無 SA**） |
+| `screenshot-3-popup.png` | 本擴充自己的 popup 介面 | 自有 |
+| `screenshot-4-japanese.png` | [日文 Wikinews「ネアンデルタール人のゲノム断片の解読と解析に成功」](https://ja.wikinews.org/wiki/ネアンデルタール人のゲノム断片の解読と解析に成功) | CC BY 4.0（**無 SA**） |
+| `promo-small-440x280.png` | 純版面，無第三方內容 | 自有 |
+| `promo-large-920x680.png` | 純版面，無第三方內容 | 自有 |
 
-`screenshot-1-web.png` 的「最後產生」停在第一個 commit，是因為 MDN 是**保留**的來源：
-換源那一輪重跑後位元組完全相同，git 因此沒有記錄變更。內容確實是 CC 授權來源。
+### 為什麼要去 ShareAlike（2026-09-09）
 
-### 標註要求（2026-09-03 補正）
+先前英文那張用 MDN、日文那張用維基百科，兩者都是 **CC BY-SA**。
+「截圖算重製還是改作」在法律上有模糊地帶：若算改作，ShareAlike 理論上會要求
+這些商店素材本身也以 BY-SA 釋出——而商店素材通常不會這樣標。
+現在兩張都換成沒有 SA 的來源，這層模糊就不存在了，不必再賭解釋。
 
-原本只寫一句「內容來自 MDN 與維基百科（CC BY-SA）」，**那不符合這兩個授權實際要求的標註**。
-MDN 明文要求：文件標題、指向該頁的超連結、修改說明，以及署名「Mozilla Contributors」；
-CC BY-SA 4.0 同樣要求署名、授權連結與變更聲明。詳細說明裡的
-【螢幕擷取畫面的內容來源】區塊已依此改寫，換素材時要一起改。
+### 選材過程中排除掉的選項（省得下次重走一遍）
 
-**截圖都是經過修改的**（疊上我們產生的譯文、加上標題橫幅），所以「經修改」這句不能省。
+- **英文 Wikinews（CC BY）**：頁面頂端掛著站方公告，Wikimedia 基金會已決定
+  **關閉所有 Wikinews 專案、轉為唯讀**。拿正在關站的專案當長期素材來源不妥。
+- **青空文庫（公有領域）**：授權最乾淨，但它是舊式 HTML，整篇用 `<br>` 不分 `<p>`，
+  分段器只找得到 4 個單元，撐不起一張截圖。
+- **PLOS ONE（CC BY 4.0）**：授權沒問題，但期刊頁面在正文前有一整塊中繼資料
+  （Editor／Copyright／Funding），版面被頁籤與側欄佔掉大半，怎麼對齊都不好看。
+- 日文那張仍用 Wikinews：日文找不到 NASA 這種等級的公有領域現代散文來源，
+  而 CC BY 4.0 本身沒有 SA 問題。**關站的疑慮仍在**——唯讀不等於刪除，網址應該還在，
+  但送審前要再確認一次連結有效。
+
+### 標註要求
+
+CC BY 與 CC BY-SA 一樣要求署名，只是沒有「相同方式分享」。
+兩個 CC BY 來源都要標：標題、作者、授權、連結，以及**變更聲明**
+（截圖疊了我們產生的譯文、加了標題橫幅）。
+NASA 是公有領域、法律上不要求署名，但仍照標，並加上「NASA 未背書」那句
+——那是 NASA 使用規範明確要求的。
 
 ### 換素材時的兩條規矩
 
 1. 換 YouTube 影片**一定要實際打開影片頁確認授權欄位寫的是創用 CC**——
    搜尋結果的 CC 篩選器會撈到轉載頻道自行標 CC 的內容，那不算數
    （實測踩過：搜尋結果前排有兩支是第三方轉載的 MIT 課程）。
-2. 授權會變。上傳者隨時可以把 CC 改回標準授權，頁面也可能下架。
-   送審前重驗一次，別依賴這份表格上次查證的結果。
-
-### 未決：ShareAlike 對商店素材的效力（需要你判斷）
-
-MDN 與維基百科都是 **BY-SA**（相同方式分享）。截圖是「重製」還是「改作」在法律上有模糊地帶：
-若被視為改作，ShareAlike 理論上會要求該衍生素材也以 CC BY-SA 釋出——
-而商店素材通常不會這樣標。實務上翻譯類擴充普遍這樣用，風險低，但**這是判斷不是事實**。
-
-要完全沒有這層模糊，唯一乾淨的做法是把兩張截圖換成
-**自有頁面或公有領域／CC0 來源**（YouTube 那張是 CC BY，沒有 SA，不受影響）。
-成本是重跑一次 `node scripts/store-assets.mjs`。要不要做由你決定。
+2. 授權會變、網站會關。送審前重驗一次，別依賴這份表格上次查證的結果。
 
 - **送審前還沒解決的一件事**：視覺識別沿用**佔位圖示**的配色與 wordmark
   （BACKLOG #12 尚未完成）。#12 做完後這批素材要重新產生，

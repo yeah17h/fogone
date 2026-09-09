@@ -2,10 +2,10 @@
 // 用法：node scripts/store-assets.mjs [--only=shots|promos]
 //
 // 產出（store/assets/）：
-//   screenshot-1-web.png        1280×800  整頁雙語（英文站）
+//   screenshot-1-web.png        1280×800  整頁雙語（英文 Wikinews）
 //   screenshot-2-youtube.png    1280×800  YouTube CC 雙語字幕
 //   screenshot-3-popup.png      1280×800  擴充視窗 UI（權限範圍訴求）
-//   screenshot-4-japanese.png   1280×800  日文站雙語
+//   screenshot-4-japanese.png   1280×800  日文 Wikinews 雙語
 //   promo-small-440x280.png     440×280   小型宣傳圖（後台必填）
 //   promo-large-920x680.png     920×680   大型宣傳圖（選填）
 //
@@ -268,6 +268,27 @@ try {
     await page.waitForTimeout(2500); // 捲動會帶出新段落，等它們翻完再截
     return ok;
   };
+  // Cookie 同意面板：通用處理，不是單站 hack。
+  // **優先按「只保留必要 cookie」那一類的按鈕**，找不到才退而按「全部接受」——
+  // 一個把「不追蹤」當賣點的產品，連產素材時都不該順手同意一堆追蹤 cookie。
+  const dismissConsent = async (page) => {
+    const preferred = [/Save Selected Preferences/i, /Reject All/i, /Only necessary/i, /必要な?のみ/, /拒否/];
+    const fallback = [/Accept All Cookies/i, /Accept all/i, /同意する/, /全部接受/];
+    for (const patterns of [preferred, fallback]) {
+      for (const re of patterns) {
+        try {
+          const b = page.getByRole('button', { name: re }).first();
+          if (await b.count() && await b.isVisible()) {
+            await b.click({ timeout: 2500 });
+            await page.waitForTimeout(1200);
+            return true;
+          }
+        } catch { /* 這個站沒有這顆鈕，試下一個 */ }
+      }
+    }
+    return false;
+  };
+
   const dismiss = async (page) => {
     if (await page.locator('[role=dialog]').count()) {
       await page.keyboard.press('Escape');
@@ -283,13 +304,28 @@ try {
       const raw = path.join(TMP, 'web.png');
       const page = await newShotPage();
       try {
-        await page.goto('https://developer.mozilla.org/en-US/docs/Web/API/Fetch_API/Using_Fetch',
+        // PLOS ONE：**CC BY 4.0，沒有 ShareAlike**。
+        // 原本用 MDN（CC BY-SA）。BY-SA 的「相同方式分享」在
+        // 「截圖算重製還是改作」上有模糊地帶——若算改作，理論上會要求
+        // 這張商店素材本身也以 BY-SA 釋出。改用純 BY 的來源就沒有這層問題。
+        //
+        // 為什麼不用 Wikinews（也是 CC BY）：實測頁面頂端掛著站方公告，
+        // Wikimedia 基金會已決定關閉所有 Wikinews 專案、轉為唯讀。
+        // 拿正在關站的專案當長期商店素材來源不妥，那條橫幅也會直接入鏡。
+        await page.goto('https://science.nasa.gov/universe/black-holes/',
           { waitUntil: 'domcontentloaded' });
         await page.waitForTimeout(3000);
+        await dismissConsent(page);
         await dismiss(page);
         await translate(page);
         await page.waitForTimeout(4000);
-        needed(await scrollToFirstTranslation(page), '頁面上沒有任何譯文（<x-yi>），擴充可能沒生效');
+        await warmScroll(page);
+        console.log('  等譯文累積…', await waitForTranslations(page, 8) ? '達 8 筆' : '逾時（用現有的截）');
+        // 用「譯文夠長」而不是「第幾個」定位：期刊頁在正文前面有一整塊中繼資料
+        // （Editor／Copyright／Funding／Competing interests），數個數的方式會落在那裡，
+        // 而那是樣板文字不是文章內容。正文段落遠比中繼資料長，門檻拉到 200 就跳過去了。
+        needed(await scrollToFirstTranslation(page, 118, 0, 150),
+          '頁面上沒有夠長的正文譯文，擴充可能沒生效');
         await page.screenshot({ path: raw });
         console.log('  x-yi =', await page.locator('x-yi').count());
       } finally { await page.close().catch(() => {}); }
@@ -379,9 +415,20 @@ try {
         const stableSince = prev && prev.src === src && prev.zh === zh ? prev.t : Date.now();
         window.__yiShotPrev = { src, zh, t: stableSince };
         if (src.length < 60 || zh.length < 16) return false;
+        // 長度擋不住「語助詞連發」：實測抓到過
+        // "not exact okay cool I you guys are all over this very good okay so look"
+        // ——長度達標，譯文卻是一串沒有意義的碎詞。再加一道內容密度判準：
+        // 要有幾個實詞（長度 ≥6 的英文字），而且填充詞不能佔太高比例。
+        const words = src.toLowerCase().match(/[a-z']+/g) ?? [];
+        if (words.length < 8) return false;
+        const contentWords = words.filter((w) => w.length >= 6).length;
+        const FILLER = new Set(['okay', 'ok', 'so', 'um', 'uh', 'like', 'you', 'know',
+          'i', 'we', 'just', 'right', 'yeah', 'well', 'good', 'all', 'very', 'and', 'the']);
+        const fillers = words.filter((w) => FILLER.has(w)).length;
+        if (contentWords < 3 || fillers / words.length > 0.55) return false;
         return Date.now() - stableSince >= 500;
-      }, null, { timeout: 60000, polling: 200 })
-        .catch(() => { throw new Error('等不到「原文夠長且譯文已跟上」的穩定畫面（60s）'); });
+      }, null, { timeout: 150000, polling: 200 })
+        .catch(() => { throw new Error('等不到「原文夠長、譯文跟上、且不是語助詞連發」的穩定畫面（150s）'); });
       await page.screenshot({ path: raw });
       console.log('  字幕譯文節點 =', await page.locator('x-yi[data-yi-captions]').count());
       } finally { await page.close().catch(() => {}); }
@@ -440,11 +487,18 @@ try {
       // 日文維基百科：內容為 CC BY-SA 4.0，來源授權明確，且是連續的長段正文
       // ——比技術部落格更適合展示「整篇對照」。直接指定條目，不做站內找連結，
       // 少一個會隨版面改動而失效的環節。
-      // 挑沒有數學公式的條目：有公式的條目（機械学習實測）第一批譯文會是
-      // `{\displaystyle …}` 的公式原始碼，畫面很難看。
-      const href = 'https://ja.wikipedia.org/wiki/オープンソース';
+      // 日文 Wikinews：**CC BY 4.0，沒有 ShareAlike**。原本用日文維基百科（CC BY-SA 4.0）。
+      //
+      // 兩個已知狀況，換素材前要一起看：
+      // 1. 專案正在關站（轉為唯讀），頁面頂端掛著站方公告橫幅。
+      //    橫幅不必特別處理——scrollToFirstTranslation() 會對齊到第一段正文，
+      //    橫幅自然被推出畫面外（跟當初處理 MDN 頁首廣告是同一招）。
+      // 2. 青空文庫（公有領域）試過但不適用：它是舊式 HTML，整篇用 <br> 不用 <p>，
+      //    分段器只找得到 4 個單元，撐不起一張截圖。
+      const href = 'https://ja.wikinews.org/wiki/%E3%83%8D%E3%82%A2%E3%83%B3%E3%83%87%E3%83%AB%E3%82%BF%E3%83%BC%E3%83%AB%E4%BA%BA%E3%81%AE%E3%82%B2%E3%83%8E%E3%83%A0%E6%96%AD%E7%89%87%E3%81%AE%E8%A7%A3%E8%AA%AD%E3%81%A8%E8%A7%A3%E6%9E%90%E3%81%AB%E6%88%90%E5%8A%9F';
       await page.goto(href, { waitUntil: 'domcontentloaded' });
       await page.waitForTimeout(3000);
+      await dismissConsent(page);
       await dismiss(page);
       // 收掉維基百科的「外觀」側欄，讓正文佔更多版面（點的是站方自己的收合鈕，不是改版面）
       try {
@@ -454,7 +508,8 @@ try {
       await translate(page);
       await page.waitForTimeout(4500);
       await warmScroll(page);
-      console.log('  等譯文累積…', await waitForTranslations(page, 8) ? '達 8 筆' : '逾時（用現有的截）');
+      // Wikinews 的文章比維基百科條目短，門檻放 5 就夠，不必空等逾時
+      console.log('  等譯文累積…', await waitForTranslations(page, 5) ? '達 5 筆' : '逾時（用現有的截）');
       // 失敗時把語言包狀態一起講出來：實測踩過一次 ja→zh-Hant 暫時回報 downloadable，
       // 於是日文全被跳過、只翻到頁面上零星的英文。光看「沒有譯文」查不出這件事。
       const st = await page.evaluate(() => new Promise((res) => {
