@@ -36,12 +36,21 @@ Chrome 擴充（WXT + TypeScript + React）。預設用 Chrome 內建 Translator
 - `npm run build:test`：測試建置（含測試觸發器）
 - `npm run build`：正式建置（不含觸發器）
 - `node scripts/verify.mjs <url> [--scroll]`：載入擴充 → 開頁 → 觸發翻譯 → 輸出 xyiCount 與 reports/verify.png
+- `node scripts/verify-pdf.mjs [額外的.pdf …] [--stress N]`：PDF 檢視器驗證（M3 5d）——
+  三份 fixture PDF 開檔 → 翻譯 → 捲到底，加上錯誤情境、逃生口與記憶體壓測
+- `node scripts/verify-yt.mjs [videoId] [秒數]`：YouTube 字幕驗證（M2）
+- 三個 verify 腳本共用 `scripts/chrome.mjs` 啟動真 Chrome 並用 CDP 附加
 
 ## 驗證迴圈（每個修改都要走完）
 1. `npm run compile && npm run build:test`
 2. `node scripts/verify.mjs <與該 issue 相關的網站>`（動態頁加 `--scroll`）
 3. 讀 stdout 的統計與 reports/verify.png 截圖，對照 BACKLOG.md 該項的驗收標準
 4. 不過就繼續改；過了才收工，回報 diff 摘要與驗證數據
+
+**診斷面板的原則：每一格都必須可能變化。數學上恆為常數的格子是裝飾，不是檢查。**
+（來源：M3 5d 的段落總帳原本有一格「其他」用來抓「加不起來的餘數」，
+但兩個推算格會把差額吃光，那一格恆為 0——它看起來像在把關，其實永遠不會響。
+刪掉它、把「加總必為總數」寫成算式保證，比留著一個假的警報器誠實。）
 
 **驗收指標的原則：量測「完成的翻譯工作」，不量測「量測當下的 DOM 殘留」。**
 所以數量看 `stats.done`（累計完成數），不看 `xyiCount`——虛擬化的站（Threads 實測貼文容器
