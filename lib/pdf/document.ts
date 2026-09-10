@@ -40,24 +40,59 @@ export const MAX_PDF_BYTES = 100 * 1024 * 1024;
  * 我們就替對方探測了普通網頁碰不到的 localhost 與區網設備。
  * 成功／失敗與載入時間本身就是可觀測的訊號，不必真的把內容回傳給攻擊者才算外洩。
  */
+function isPrivateIPv4(host: string): boolean {
+  return host === '0.0.0.0'
+    || /^127\./.test(host)
+    || /^10\./.test(host)
+    || /^192\.168\./.test(host)
+    || /^169\.254\./.test(host)
+    || /^172\.(1[6-9]|2\d|3[01])\./.test(host);
+}
+
+/**
+ * IPv6 字面量裡藏的 IPv4。**非查不可**：`http://[::ffff:127.0.0.1]/` 會被
+ * URL 正規化成 `[::ffff:7f00:1]`——長得完全不像 127.0.0.1，卻連到同一個地方。
+ * 只比對 `::1` 的話這條路是敞開的。
+ * 回傳點分十進位，認不出來就回 null。
+ */
+function embeddedIPv4(host: string): string | null {
+  // `::ffff:127.0.0.1`（IPv4-mapped）與 `::127.0.0.1`（已廢棄的 IPv4-compatible）
+  const dotted = /^::(?:ffff:)?(\d{1,3}(?:\.\d{1,3}){3})$/.exec(host);
+  if (dotted) return dotted[1];
+  // 正規化後的十六進位形式：`::ffff:7f00:1`／`::7f00:1`
+  const hex = /^::(?:ffff:)?([0-9a-f]{1,4}):([0-9a-f]{1,4})$/.exec(host);
+  if (!hex) return null;
+  const hi = parseInt(hex[1], 16), lo = parseInt(hex[2], 16);
+  return [hi >> 8, hi & 255, lo >> 8, lo & 255].join('.');
+}
+
+/**
+ * 私網／本機位址。
+ *
+ * 已知且無法在這一層解決的限制：**這裡看的是主機名字，不是它解析到哪裡**。
+ * 一個公開網域大可指向 127.0.0.1，DNS 查詢在瀏覽器內部完成，我們看不到結果。
+ * 要真的防住得在請求送出前攔截（`declarativeNetRequest`／`webRequest`），
+ * 而本擴充刻意不要任何 `chrome.*` 權限。這條防線擋的是「照著網址就能做到」的那一類。
+ */
+function isPrivateHost(host: string): boolean {
+  if (host === 'localhost' || host.endsWith('.localhost') || host.endsWith('.local')) return true;
+  if (isPrivateIPv4(host)) return true;
+  if (!host.includes(':')) return false;          // 剩下的判斷只對 IPv6 字面量有意義
+  if (host === '::' || host === '::1') return true;
+  const v4 = embeddedIPv4(host);
+  if (v4 && isPrivateIPv4(v4)) return true;
+  if (/^(fc|fd)[0-9a-f]{2}:/.test(host)) return true;    // ULA fc00::/7
+  // link-local 是 fe80::/10，涵蓋 fe80~febf——只比對 `fe80:` 會漏掉 fe90::、feaf:: 之類
+  return /^fe[89ab][0-9a-f]:/.test(host);
+}
+
 export function assertSafePdfUrl(raw: string): URL {
   let u: URL;
   try { u = new URL(raw); } catch { throw new Error('網址格式不正確。'); }
   if (u.protocol !== 'https:' && u.protocol !== 'http:') {
     throw new Error(`只接受 http/https 的 PDF 網址（收到 ${u.protocol}）。`);
   }
-  const host = u.hostname.toLowerCase().replace(/^\[|\]$/g, '');
-  const isPrivate =
-    host === 'localhost' || host.endsWith('.localhost') || host.endsWith('.local')
-    || host === '::1' || host === '0.0.0.0'
-    || /^127\./.test(host)
-    || /^10\./.test(host)
-    || /^192\.168\./.test(host)
-    || /^169\.254\./.test(host)
-    || /^172\.(1[6-9]|2\d|3[01])\./.test(host)
-    || /^(fc|fd)[0-9a-f]{2}:/.test(host)   // ULA
-    || /^fe80:/.test(host);                // link-local
-  if (isPrivate) {
+  if (isPrivateHost(u.hostname.toLowerCase().replace(/^\[|\]$/g, ''))) {
     throw new Error(`基於安全考量，不從本機或區網位址載入 PDF（${u.hostname}）。`);
   }
   return u;
@@ -76,20 +111,57 @@ function looksLikePdf(buf: ArrayBuffer): boolean {
 }
 
 /**
+ * fetch 丟 `TypeError: Failed to fetch` 時的說明。
+ *
+ * **照抄那句話等於把使用者丟在原地。** 這裡最常見的原因不是網路壞掉，
+ * 而是擴充的「網站存取權」被使用者（或安裝時的預設）設成「點按時」——
+ * 那之後檢視器頁面就沒有該來源的權限，fetch 一定失敗，而瀏覽器只給得出那一句話。
+ * 訊息要直接說明是哪個設定、在哪裡改。
+ */
+const FETCH_FAILED_HINT =
+  '抓不到這個網址的檔案。最常見的原因是擴充的「網站存取權」被設成「點按時」或'
+  + '「在特定網站上」：請開啟 chrome://extensions →「幾個譯思 Fogone」→「詳細資料」'
+  + '→「網站存取權」，改成「在所有網站上」，再重新開啟這份 PDF。'
+  + '（若設定本來就是「在所有網站上」，那就是這個網址連不上或伺服器拒絕跨來源存取。）';
+
+/**
  * 抓取遠端 PDF。**由檢視器頁面自己 fetch，不靠 PDF.js 內建的網路層**——
  * 這樣所有對外請求都看得見、都在我們的控制下，也才對得起「不新增對外連線」的條件。
  */
 export async function fetchPdf(url: string, signal?: AbortSignal): Promise<ArrayBuffer> {
   const safe = assertSafePdfUrl(url);
-  const res = await fetch(safe.href, { signal, credentials: 'omit', redirect: 'follow' });
-  if (!res.ok) throw new Error(`抓取失敗：HTTP ${res.status}`);
+  let res: Response;
+  try {
+    res = await fetch(safe.href, { signal, credentials: 'omit', redirect: 'follow' });
+  } catch (e) {
+    if (signal?.aborted) throw e;  // 是我們自己取消的，不要把它講成權限問題
+    // 整台機器離線時把原因講成權限設定是誤導——那會讓使用者去改一個沒問題的設定。
+    if (navigator.onLine === false) throw new Error('目前沒有網路連線，無法抓取這個網址的 PDF。');
+    throw new Error(FETCH_FAILED_HINT);
+  }
+  // **重新導向之後要再驗一次**：assertSafePdfUrl() 只看得到最初的網址，
+  // 而 redirect: 'follow' 會乖乖跟著 30x 走——一個公開網址可以把我們導到
+  // 127.0.0.1 或區網位址，私網防線等於形同虛設。
+  // 已知殘留風險：這裡擋得住「把內網內容讀進來顯示」，但擋不住請求本身已經送出。
+  // 要在送出前就擋，得用 declarativeNetRequest／webRequest 這類權限，
+  // 而本擴充刻意不要任何 chrome.* 權限（見 wxt.config.ts），所以停在這一層。
+  if (res.url && res.url !== safe.href) assertSafePdfUrl(res.url);
+  if (!res.ok) throw new Error(`抓取失敗：伺服器回應 HTTP ${res.status}。`);
   // 先看 Content-Length：能擋掉的話就不要先整包下載再說
   const declared = Number(res.headers.get('content-length') ?? NaN);
   if (Number.isFinite(declared) && declared > MAX_PDF_BYTES) {
     throw new Error(`檔案過大（${(declared / 1048576).toFixed(0)} MB，上限 ${MAX_PDF_BYTES / 1048576} MB）。`);
   }
   const type = res.headers.get('content-type') ?? '';
-  const buf = await res.arrayBuffer();
+  // fetch() 收到 headers 就 resolve 了，**檔案還沒下載完**。中途斷線會在這裡丟出
+  // 原始的英文 TypeError，不接住的話使用者又會看到 "Failed to fetch" 那種話。
+  let buf: ArrayBuffer;
+  try {
+    buf = await res.arrayBuffer();
+  } catch (e) {
+    if (signal?.aborted) throw e;
+    throw new Error('下載到一半中斷了，請再試一次。');
+  }
   if (buf.byteLength > MAX_PDF_BYTES) {
     throw new Error(`檔案過大（${(buf.byteLength / 1048576).toFixed(0)} MB，上限 ${MAX_PDF_BYTES / 1048576} MB）。`);
   }
@@ -98,6 +170,19 @@ export async function fetchPdf(url: string, signal?: AbortSignal): Promise<Array
     throw new Error(`這不是 PDF（content-type: ${type || '未提供'}）。`);
   }
   return buf;
+}
+
+/**
+ * PDF.js 解析失敗的訊息。原文是英文而且對一般使用者沒有意義
+ * （"Invalid PDF structure."、"No password given"），照抄等於沒說明。
+ * 以 `name` 分辨而不是比對訊息字串：訊息會隨版本改，例外類別名不會。
+ */
+function parseErrorMessage(e: unknown): string {
+  const name = (e as { name?: string } | null)?.name ?? '';
+  const raw = e instanceof Error ? e.message : String(e);
+  if (name === 'PasswordException') return '這份 PDF 有密碼保護，檢視器無法開啟。';
+  if (name === 'InvalidPDFException') return `這個檔案的 PDF 結構已損毀，無法解析（${raw}）。`;
+  return `無法解析這份 PDF：${raw}`;
 }
 
 export async function openPdf(source: PdfSource, signal?: AbortSignal): Promise<OpenedPdf> {
@@ -131,6 +216,12 @@ export async function openPdf(source: PdfSource, signal?: AbortSignal): Promise<
   let doc: pdfjs.PDFDocumentProxy;
   try {
     doc = await task.promise;
+  } catch (e) {
+    if (signal?.aborted) throw e;
+    // 解析失敗時 task 還握著 worker／transport，呼叫端拿不到 OpenedPdf 也就沒機會收，
+    // 連續丟幾份損毀檔進來就會一直累積。
+    void task.destroy().catch(() => {});
+    throw new Error(parseErrorMessage(e));
   } finally {
     signal?.removeEventListener('abort', onAbort);
   }

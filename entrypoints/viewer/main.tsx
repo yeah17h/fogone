@@ -30,10 +30,17 @@ type Loaded = {
   numPages: number;
   title: string | null;
   pagesRead: number;
+  /** 文字層抽取失敗的頁數（損毀 PDF 常常只壞其中幾頁） */
+  pagesFailed: number;
+  /** 第一頁失敗的原因，用來分辨「壞掉一頁」與「整個 worker 掛了」 */
+  firstPageError: string;
   paragraphs: Paragraph[];
 };
 
-const MAX_PAGES = 30; // 一次讀的頁數上限；效能調校是 5d
+// 一次讀的頁數上限。實測（scripts/verify-pdf.mjs）：9 頁雙欄論文抽字 113ms／83 段；
+// 讀滿上限的 30 頁是 157ms／291 段，翻譯進行中連續捲動仍是 120fps、最長一幀 9ms。
+// 也就是說上限不是為了效能——瓶頸不在這裡——而是防「幾百頁的掃描書」一次把分頁吃垮。
+const MAX_PAGES = 30;
 
 function App() {
   const [status, setStatus] = useState<Status>({ phase: 'idle' });
@@ -77,6 +84,14 @@ function App() {
 
     let doc: OpenedPdf | null = null;
     try {
+      // 大小檢查放在這裡而不是呼叫端：呼叫端擋下來的話只會 setStatus 而不動
+      // generation，於是「A 還在抽字時選了過大的 B」會讓 A 完成後把 B 的錯誤蓋掉。
+      // 進到這條路徑就吃得到 generation 保護。（擋在 arrayBuffer() 之前，
+      // 不然 100MB 的檔案已經整包讀進記憶體才拒絕。）
+      if (source.kind === 'file' && source.file.size > MAX_PDF_BYTES) {
+        throw new Error(`檔案過大（${(source.file.size / 1048576).toFixed(0)} MB，`
+          + `上限 ${MAX_PDF_BYTES / 1048576} MB）。`);
+      }
       const opened = source.kind === 'file'
         ? { kind: 'data' as const, data: await source.file.arrayBuffer() }
         : source;
@@ -86,15 +101,36 @@ function App() {
       docRef.current = doc;
       const n = Math.min(doc.numPages, MAX_PAGES);
       const pages: PageText[] = [];
+      // 單頁抽字失敗不該讓整份文件開不起來：損毀的 PDF 常常只壞其中幾頁，
+      // 其餘照樣讀得出來。全部頁都失敗才算這份檔案開不起來。
+      // **但要留下原因**：這個 catch 也會吞掉 worker 崩潰之類的系統性錯誤，
+      // 只記個數字的話畫面上會變成「少了幾頁，不知道為什麼」——零遙測產品
+      // 沒有遠端 log 可以事後追，診斷只能留在使用者看得到的地方。
+      let pagesFailed = 0;
+      let firstPageError = '';
       for (let p = 1; p <= n; p++) {
         if (gen !== genRef.current) return;
         setStatus({ phase: 'loading', what: `${name}（抽取第 ${p}/${n} 頁文字層）` });
-        pages.push(await doc.getPageText(p));
+        try {
+          pages.push(await doc.getPageText(p));
+        } catch (e) {
+          pagesFailed++;
+          if (!firstPageError) firstPageError = e instanceof Error ? e.message : String(e);
+        }
       }
       if (gen !== genRef.current) return;
+      if (pages.length === 0) {
+        // 這份文件已經沒有用處了。docRef 清掉之後，下面的 finally 會負責釋放它——
+        // 留著的話它要等到「下一次載入或離開頁面」才會被收。
+        docRef.current = null;
+        throw new Error(`這份 PDF 的 ${n} 頁全部無法讀取文字層，檔案可能已損毀`
+          + `${firstPageError ? `（${firstPageError}）` : ''}。`);
+      }
       const paragraphs = reflow(pages);
       setLoaded({ sourceUrl, name, numPages: doc.numPages, title: doc.title,
-                  pagesRead: pages.length, paragraphs });
+                  // pagesRead 是「這次嘗試讀的頁數」，不是「成功的頁數」——
+                  // 用成功數的話，10 頁壞 1 頁會顯示成「本次讀取前 9 頁」，那是假的。
+                  pagesRead: n, pagesFailed, firstPageError, paragraphs });
       setStatus({ phase: 'ready' });
       doc = null;                            // 交棒給 docRef，不要在 finally 收掉
     } catch (e) {
@@ -196,28 +232,63 @@ function App() {
     return () => clearInterval(timer);
   }, [translating]);
 
-  // 「完成 0」在畫面上跟「壞掉了」長得一模一樣，所以找到了段落卻一段都沒翻時，
-  // 一定要講出原因。中文 PDF 全部被跳過是**正確行為**（zh→zh-Hant 沒有東西可翻），
-  // 但不講的話使用者只會看到一個不動的 0。
-  const skipReason = (() => {
-    if (!stats || stats.done > 0 || stats.found === 0) return '';
-    const reasons: string[] = [];
-    if (stats.skippedChinese > 0) reasons.push(`已經是中文 ${stats.skippedChinese} 段`);
-    if (stats.skippedDetect > 0) reasons.push(`非英日文 ${stats.skippedDetect} 段`);
-    if (stats.skippedPack > 0) {
-      const packs = Object.entries(stats.availability).map(([pair, state]) => `${pair} ${state}`).join('、');
-      reasons.push(`語言包未就緒 ${stats.skippedPack} 段（${packs}）`);
-    }
-    if (reasons.length === 0) return '';
-    return `找到 ${stats.found} 段，但都沒有送進引擎——${reasons.join('、')}。`;
+  // 段落去向的總帳。
+  //
+  // 「完成 0」在畫面上跟「壞掉了」長得一模一樣——中文 PDF 全部被跳過是**正確行為**
+  // （zh→zh-Hant 沒有東西可翻），但不講的話使用者只會看到一個不動的 0。
+  // 所以不是只在完成 0 時才解釋，而是**每一段都要有去處**。
+  //
+  // 加總必為段落總數，這是算式保證的（不是靠事後檢查）：三個推算格
+  // 「過短未收 = 總數 − 找到」「尚未捲到 = 找到 − 已排隊」「處理中 = 已排隊 − 各種結局」
+  // 一路把差額吸收掉。
+  // 所以這裡沒有「其他」那一格——它在數學上永遠是 0，留著只是假裝有在檢查。
+  // 真的出事時看得出來的是**負數**：分段器收到的單位比段落還多（例如檢視器自己的
+  // 介面文字被當成內容收走）會讓「過短未收」變成負的，那一眼就知道不對勁。
+  const ledger = (() => {
+    if (!stats || !loaded) return '';
+    const total = loaded.paragraphs.length;
+    // 分段器會濾掉太短、沒有字母的段落（PDF 常見的殘留編號、頁碼、單一符號），
+    // 那些根本沒進佇列，統計裡看不到，只能用「總數 − 找到」反推。
+    const notCollected = total - stats.found;
+    // 「還沒進視窗」與「進了視窗正在跑」是兩回事，不能都叫「尚未捲到」——
+    // 剛按下翻譯時首屏那幾段明明正在打引擎，卻被講成沒捲到，那是假的。
+    // stats.queued 正好把兩者分開：進過視窗的才會被 enqueue。
+    const notQueued = stats.found - stats.queued;
+    const inFlight = stats.queued - stats.done - stats.failed
+      - stats.skippedChinese - stats.skippedDetect - stats.skippedPack;
+    const packs = Object.entries(stats.availability).map(([p, s]) => `${p} ${s}`).join('、');
+    const buckets: [string, number][] = [
+      ['完成', stats.done],
+      ['已是中文', stats.skippedChinese],
+      ['非英日文', stats.skippedDetect],
+      [`語言包未就緒${packs ? `（${packs}）` : ''}`, stats.skippedPack],
+      ['失敗', stats.failed],
+      ['過短未收', notCollected],
+      ['尚未捲到', notQueued],
+      ['處理中', inFlight],
+    ];
+    const parts = buckets.filter(([, v]) => v !== 0).map(([k, v]) => `${k} ${v}`);
+    return `段落 ${total}——${parts.join('、')}。`;
   })();
 
+  // build:test 產物才有：讓 scripts/verify-pdf.mjs 直接讀數字，
+  // 不必去解析畫面上的中文句子（那種解析一改文案就無聲壞掉）。
+  if (__YI_TESTING__) {
+    (window as unknown as Record<string, unknown>).__yiViewer = {
+      // 載入序號：同一個分頁連開多份檔案時，沒有它就分不出畫面上的 ready
+      // 是這次的還是上一份留下的（壓測迴圈會誤判成「載入完成」）。
+      gen: genRef.current,
+      phase: status.phase,
+      message: status.phase === 'error' ? status.message : '',
+      paragraphs: loaded?.paragraphs.length ?? 0,
+      pagesRead: loaded?.pagesRead ?? 0,
+      pagesFailed: loaded?.pagesFailed ?? 0,
+      ledger,
+      stats,
+    };
+  }
+
   const takeFile = useCallback((file: File) => {
-    if (file.size > MAX_PDF_BYTES) {
-      setStatus({ phase: 'error',
-        message: `檔案過大（${(file.size / 1048576).toFixed(0)} MB，上限 ${MAX_PDF_BYTES / 1048576} MB）。` });
-      return;
-    }
     void load({ kind: 'file', file }, file.name, null);
   }, [load]);
 
@@ -234,10 +305,10 @@ function App() {
       onDragLeave={() => setDragging(false)}
       onDrop={onDrop}
     >
-      <header style={S.header}>
+      <header style={S.header} data-yi-skip="">
         <div>
           <strong style={{ fontSize: 16 }}>幾個譯思 — PDF 檢視器</strong>
-          <div style={S.dim}>文字層抽取（5a 殼）。雙語渲染尚未接上。</div>
+          <div style={S.dim}>重排成段落後雙語對照。檔案只在你的瀏覽器裡處理，不會上傳。</div>
         </div>
         <div style={{ display: 'flex', gap: 8 }}>
           {loaded && (translating
@@ -255,33 +326,37 @@ function App() {
         onChange={(e) => { const f = e.target.files?.[0]; if (f) void takeFile(f); }} />
 
       {status.phase === 'idle' && (
-        <div style={{ ...S.drop, ...(dragging ? S.dropActive : null) }}>
+        <div style={{ ...S.drop, ...(dragging ? S.dropActive : null) }} data-yi-skip="">
           <div style={{ fontSize: 15 }}>把 PDF 拖進這裡</div>
           <div style={S.dim}>或按右上角「選擇 PDF 檔…」。檔案只在你的瀏覽器裡處理，不會上傳。</div>
         </div>
       )}
 
-      {status.phase === 'loading' && <p style={S.note}>載入中：{status.what}</p>}
+      {status.phase === 'loading' && <p style={S.note} data-yi-skip="">載入中：{status.what}</p>}
 
       {status.phase === 'error' && (
-        <div style={S.error}>
+        <div style={S.error} data-yi-skip="">
           <strong>開不起來</strong>
           <div style={{ marginTop: 6 }}>{status.message}</div>
         </div>
       )}
 
       {status.phase === 'ready' && loaded && (
-        <section style={S.summary}>
+        // data-yi-skip：統計列是我們自己的介面文字。不標的話，段落數少到啟動密度備援時
+        // 它會被當成內容收進去翻——統計列翻譯自己，總帳也就對不上了。
+        <section style={S.summary} data-yi-skip="">
           <div><b>{loaded.title ?? loaded.name}</b></div>
           <div style={S.dim}>
             {loaded.numPages} 頁
             {loaded.numPages > loaded.pagesRead && `（本次讀取前 ${loaded.pagesRead} 頁）`}
+            {loaded.pagesFailed > 0
+              && `｜${loaded.pagesFailed} 頁讀不出文字層（${loaded.firstPageError}）`}
             ｜段落 {loaded.paragraphs.length}
             {stats && `｜完成 ${stats.done}｜引擎呼叫 ${stats.engineCalls}｜快取命中 ${stats.cacheHits}`}
             {stats && stats.failed > 0 && `｜失敗 ${stats.failed}`}
           </div>
           {statusLine && <div style={{ ...S.dim, marginTop: 4 }}>{statusLine}</div>}
-          {skipReason && <div style={{ ...S.dim, marginTop: 4 }}>{skipReason}</div>}
+          {ledger && <div style={{ ...S.dim, marginTop: 4 }}>{ledger}</div>}
         </section>
       )}
 
