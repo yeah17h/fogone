@@ -7,7 +7,7 @@
 Chrome 擴充。預設使用 Chrome 內建的本地 Translator API，原文與譯文並排顯示，
 不覆蓋、不取代原文。給在意資料流向、但不想為此折騰設定的中文重度外文閱讀者。
 
-> 開發中，尚未上架。版本 0.1.0（內測開門版）。
+> 開發中，尚未上架。版本 0.2.0（M3：PDF 文字層雙語閱讀）。
 
 ### 關於名字
 
@@ -102,6 +102,8 @@ npm run zip        # 打包上架用 zip
 ```bash
 node scripts/verify.mjs <url> [--scroll]   # 一般網頁：分段、譯文數、外框排除、快取
 node scripts/verify-yt.mjs [videoId] [秒]  # YouTube 字幕：cue 數、引擎呼叫、播放控制
+node scripts/verify-pdf.mjs [額外.pdf] [--stress N]
+                                           # PDF 檢視器：段落總帳、效能、錯誤處理、逃生口
 node scripts/spike-summarizer.mjs          # Summarizer API 可行性量測（不會觸發下載）
 ```
 
