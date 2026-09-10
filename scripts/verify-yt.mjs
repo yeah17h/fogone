@@ -3,65 +3,18 @@
 // 預設影片：8aGhZQkoFbQ（Philip Roberts, "What the heck is the event loop anyway?"）
 //   選它的理由：技術演講、有「英文 (自動產生)」字幕軌，正是最難的那種逐字滾動 CC。
 //
-// 前置與 verify.mjs 相同（.pw-profile 需一次性手動安裝擴充＋啟用語言包）。
-import { chromium } from 'playwright';
-import { spawn, execSync } from 'node:child_process';
+// Chrome 的啟動與 CDP 附加見 scripts/chrome.mjs（含一次性前置設定）。
 import path from 'node:path';
-import fs from 'node:fs';
+import { ROOT, launchChrome } from './chrome.mjs';
 
 const arg = process.argv[2] ?? '8aGhZQkoFbQ';
 const videoUrl = arg.startsWith('http') ? arg : `https://www.youtube.com/watch?v=${arg}`;
 const SAMPLE_S = Number(process.argv[3] ?? 60);
 
-const ROOT = path.resolve(import.meta.dirname, '..');
-const ext = path.join(ROOT, '.output/chrome-mv3');
-const profile = path.join(ROOT, '.pw-profile');
-const PORT = 9333;
-const CHROME = '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
-
-if (!fs.existsSync(ext)) { console.error('找不到 .output/chrome-mv3，先跑 npm run build:test'); process.exit(1); }
-fs.mkdirSync(path.join(ROOT, 'reports'), { recursive: true });
-
-function pids() {
-  try {
-    return execSync(`pgrep -f "user-data-dir=${profile}" || true`, { encoding: 'utf8' })
-      .split('\n').map((s) => s.trim()).filter(Boolean);
-  } catch { return []; }
-}
-function killProfileChrome() {
-  for (const sig of ['SIGTERM', 'SIGKILL']) {
-    if (pids().length === 0) return;
-    for (const p of pids()) { try { process.kill(Number(p), sig); } catch {} }
-    const deadline = Date.now() + 4000;
-    while (Date.now() < deadline && pids().length > 0) { try { execSync('sleep 0.2'); } catch {} }
-  }
-}
-killProfileChrome();
-
-const chrome = spawn(CHROME, [
-  `--remote-debugging-port=${PORT}`, `--user-data-dir=${profile}`,
-  '--no-first-run', '--no-default-browser-check', '--disable-features=TranslateUI',
-  '--autoplay-policy=no-user-gesture-required', 'about:blank',
-], { stdio: 'ignore' });
-let closed = false;
-const cleanup = () => { if (closed) return; closed = true; try { chrome.kill('SIGTERM'); } catch {} killProfileChrome(); };
-process.on('exit', cleanup);
-process.on('SIGINT', () => { cleanup(); process.exit(130); });
-
-async function waitForCDP(ms = 30000) {
-  const deadline = Date.now() + ms;
-  while (Date.now() < deadline) {
-    try { const r = await fetch(`http://localhost:${PORT}/json/version`); if (r.ok) return; } catch {}
-    await new Promise((r) => setTimeout(r, 300));
-  }
-  throw new Error('Chrome CDP 沒有就緒');
-}
-
-let browser;
+// 影片要能自己播起來，不然字幕根本不會出現
+const { ctx, close } = await launchChrome({ args: ['--autoplay-policy=no-user-gesture-required'] });
 try {
-  await waitForCDP();
-  browser = await chromium.connectOverCDP(`http://localhost:${PORT}`);
-  const page = await browser.contexts()[0].newPage();
+  const page = await ctx.newPage();
   await page.setViewportSize({ width: 1280, height: 800 });
 
   const yiErrors = [];
@@ -288,6 +241,5 @@ try {
   console.log('screenshot → reports/verify-yt.png、reports/verify-yt-fullscreen.png');
   await page.close();
 } finally {
-  if (browser) await browser.close().catch(() => {});
-  cleanup();
+  await close();
 }
