@@ -88,18 +88,28 @@ npm run build && grep -rl "__YI_TESTING__\|__yiViewer\|yi:.*dev" .output/chrome-
 | 6 | 正式建置測試痕跡 | ✅ `__YI_TESTING__`／`__yiViewer` 零命中 |
 | 7 | 版本一致 | ✅ package.json / manifest.json / README 皆為 0.2.0 |
 
-### ⚠️ 待裁決：git 歷史裡有一個真實信箱
+### git 歷史裡的真實信箱 — 已於公開前移除（裁決：重寫歷史）
 
-commit `5069a56`（skeleton v0.0.4）含 `.claude/settings.local.json`，
-裡面有一行工具設定寫著 `***REMOVED***`。該檔在 `ce4489d` 已從索引移除並加入
-`.gitignore`，**但歷史仍在**，公開後可被讀到。
+**問題**：早期的 `skeleton v0.0.4` commit 含 `.claude/settings.local.json`，
+其中一行工具設定帶有開發者的真實信箱。該檔稍後已從索引移除並加入 `.gitignore`，
+**但歷史仍在**——公開後任何人都讀得到。
 
-- 影響範圍：一個 email 位址。commit 作者用的是 GitHub noreply，所以這是**唯一**一處。
-- 選項 A：接受。信箱本來就與這個 GitHub 帳號關聯，公開後多一處曝光。
-- 選項 B：公開前重寫歷史（`git filter-repo --path .claude --invert-paths`）。
-  repo 尚未公開、沒有其他人 clone，這是重寫成本最低的時機；代價是所有 commit hash 改變。
+**裁決（2026-09-12）：選項 B，公開前把整條路徑自全部歷史移除。**
 
-**這一項由專案擁有者決定，不自行處理**（重寫歷史是不可逆動作）。
+理由：這與先前「把 commit 作者身分改成 GitHub noreply」是**同一條隱私決策**。
+既然已經為了不外流信箱而改寫過作者欄，留著另一處等於前功盡棄——
+防線只有全部成立才有意義。而此時尚未 push、無人 clone，
+重寫成本趨近於零，且這是**最後一次**成本這麼低的機會：一旦公開就永遠收不回來。
+代價是所有 commit hash 改變，在沒有外部 clone 的前提下沒有影響。
+
+被否決的選項 A（接受曝光）留檔：信箱本來就與該 GitHub 帳號關聯，
+多一處曝光的邊際傷害有限——但「邊際傷害有限」不是留著它的理由，
+在成本趨零時尤其不是。
+
+**執行方式**：`git filter-repo --invert-paths --path .claude/settings.local.json`，
+搭配 `--replace-text` 一併清掉**本檔自己早期版本裡引述的那串字面位址**
+（本檔在記錄這個問題時把信箱原文抄了進去，只清設定檔而留著這裡，等於白做）。
+執行前先 `git clone --mirror . ../yi-backup.git` 留一份可回復的備份。
 
 ### fixture 授權依據
 
