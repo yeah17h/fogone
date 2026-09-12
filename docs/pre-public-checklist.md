@@ -71,14 +71,14 @@ npm run build && grep -rl "__YI_TESTING__\|__yiViewer\|yi:.*dev" .output/chrome-
 
 ---
 
-## 執行結果（2026-09-10，v0.2.0）
+## 執行結果（2026-09-10 初次；歷史項於 2026-09-12 補正，v0.2.0）
 
 | # | 項目 | 結果 |
 |---|---|---|
 | 1 | 祕密與金鑰 | ✅ 追蹤中的檔案零命中 |
 | 2 | 個資與本機路徑（現況） | ✅ 追蹤中的檔案零命中 |
 | 2 | commit 作者 | ✅ 全部是 `57469517+yeah17h@users.noreply.github.com`，無真實信箱 |
-| 2 | **歷史** | ⚠️ **一項待裁決，見下方** |
+| 2 | **歷史** | ✅ 已於公開前重寫移除，見下方 |
 | 3 | `.gitignore` 涵蓋 | ✅ 七項全部涵蓋；`.pw-profile/` 未追蹤且無登入 cookie |
 | 3 | 根目錄非程式檔 | ✅ 無 |
 | 3 | 歷史中的意外檔案 | ✅ 曾加入過的 51 個檔案全部是程式、文件或刻意納入的素材，無試算表／營運文件 |
@@ -111,6 +111,35 @@ npm run build && grep -rl "__YI_TESTING__\|__yiViewer\|yi:.*dev" .output/chrome-
 （本檔在記錄這個問題時把信箱原文抄了進去，只清設定檔而留著這裡，等於白做）。
 執行前先 `git clone --mirror . ../yi-backup.git` 留一份可回復的備份。
 
+#### 執行與驗證（2026-09-12）
+
+工具 `git-filter-repo` 2.47.0（`brew install git-filter-repo`）。
+備份：`../yi-backup.git`（mirror，35 commits、兩個 tag 齊全，改壞可回復）。
+
+```
+git filter-repo --force \
+  --invert-paths --path .claude/settings.local.json \
+  --replace-text <(echo 'literal:<位址>==>***REMOVED***')
+```
+
+| 驗證項 | 指令要旨 | 結果 |
+|---|---|---|
+| 全史 blob 不含該位址 | 走訪 `rev-list --objects --all` 的每個 blob 逐一 `cat-file` | **0 個 blob 命中**（改寫前為 2） |
+| 全史不含該檔案路徑 | 對每個 commit 跑 `ls-tree -r --name-only` 後彙總 | **0 命中** |
+| commit 訊息與作者欄 | `log --all --format='%an %ae%n%B'` | **0 命中** |
+| `--replace-text` 確實生效 | 在舊版 blob 裡找 `***REMOVED***` | ✅ 找到（證明零命中不是掃描漏看） |
+| 工作目錄內容不變 | 改寫前後各取 `git ls-files` 全檔雜湊再彙總 | **`9f5f4152…` 前後完全相同** |
+| commit 序列 | 與備份逐條 diff 主旨 | 舊 35 條完全一致；第 36 條是改寫前補記裁決的那個 commit |
+| tag 存續 | `cat-file -t` 與 `rev-parse ^{commit}` | `v0.1.0`、`v0.2.0` 皆仍為 annotated tag，指向改寫後對應的 commit（主旨相同） |
+| 程式未受影響 | `npm run compile && npm test && npm run build` | ✅ 型別檢查通過、37 測試全過、正式建置零測試痕跡、manifest 0.2.0 |
+
+**兩個 blob 都清掉了**：一個是設定檔本身，另一個是**本檔早期版本**——
+它在描述這個問題時把位址原文抄了進去。只清前者而留著後者，等於沒清。
+這件事本身值得記著：**寫「某處有祕密」的文件時，不要把那個祕密再抄一遍。**
+
+改寫後所有 commit hash 均已改變。備份 `../yi-backup.git` 在確認 push 無誤前先留著，
+之後再刪。
+
 ### fixture 授權依據
 
 | fixture | 來源 | 授權依據 |
@@ -121,6 +150,16 @@ npm run build && grep -rl "__YI_TESTING__\|__yiViewer\|yi:.*dev" .output/chrome-
 
 原始 PDF 本身**不進版本庫**（`.pdf-fixtures/` 已 gitignore），
 repo 裡只有抽出來的文字層 JSON，由 `node scripts/make-pdf-fixtures.ts` 重新產生。
+
+---
+
+## 狀態：✅ 可公開（2026-09-12，v0.2.0）
+
+12 項檢查全數通過，git 歷史已完成公開前的最後一次清理。
+**尚未 push**——等專案擁有者指示。
+
+push 前最後確認一次：遠端 repo 建立時**不要**勾自動產生 README／LICENSE／.gitignore，
+以免與既有歷史衝突；第一次推送要連 tag 一起（`git push -u origin main --tags`）。
 
 ### 公開時要一起做的事
 
