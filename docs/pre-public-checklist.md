@@ -153,18 +153,22 @@ repo 裡只有抽出來的文字層 JSON，由 `node scripts/make-pdf-fixtures.t
 
 ---
 
-## 狀態：✅ 可公開（2026-09-12，v0.2.0）
+## 狀態：✅ 已公開（2026-09-12，v0.2.0）
 
-12 項檢查全數通過，git 歷史已完成公開前的最後一次清理。
-**尚未 push**——等專案擁有者指示。
+12 項檢查全數通過，git 歷史已完成公開前的最後一次清理，並已推送至
+**https://github.com/yeah17h/fogone**（public，AGPL-3.0）。
 
-push 前最後確認一次：遠端 repo 建立時**不要**勾自動產生 README／LICENSE／.gitignore，
-以免與既有歷史衝突；第一次推送要連 tag 一起（`git push -u origin main --tags`）。
+推送結果覆核：遠端 `main` 與本地 HEAD 同為 `f4a8817`；`v0.1.0`、`v0.2.0`
+兩個 annotated tag 都在（解引用後分別指向 `9d712a3`、`366ea1f`）；
+遠端 commit 數 37，與改寫後的本地一致；`.claude/` 在遠端回 404，
+確認推上去的是清理後的歷史而不是舊的。
 
 ### 公開時要一起做的事
 
-- [ ] `store/listing.md` 詳細說明最後的「原始碼：TBD」填入 repo 連結
-- [ ] `PRIVACY.md` 需要一個公開網址（Chrome 線上應用程式商店的隱私權政策欄位要填 URL）
+- [x] `store/listing.md` 詳細說明最後的「原始碼：TBD」填入 repo 連結
+      → `https://github.com/yeah17h/fogone`（2026-09-12）
+- [x] `PRIVACY.md` 需要一個公開網址（Chrome 線上應用程式商店的隱私權政策欄位要填 URL）
+      → `https://github.com/yeah17h/fogone/blob/main/PRIVACY.md`（實測 200）
 - [ ] BACKLOG #12（正式 wordmark 與圖示）完成後重產商店素材——
       現行素材沿用佔位圖示配色，商店頁與使用者裝好後看到的圖示會長得不一樣
 - [ ] `.claude/settings.json`（只有一行啟用 ponytail 外掛）決定要不要納入版本庫
