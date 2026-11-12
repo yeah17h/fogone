@@ -9,32 +9,18 @@
 //
 // 環境需求同 verify.mjs：系統安裝的正式版 Chrome ＋ .pw-profile。
 import { chromium } from 'playwright';
-import { spawn, execSync } from 'node:child_process';
+import { spawn } from 'node:child_process';
 import path from 'node:path';
 import fs from 'node:fs';
+import { CHROME, killProfileChrome as killChrome } from './chrome.mjs';
 
 const allowDownload = process.argv.includes('--allow-download');
 const ROOT = path.resolve(import.meta.dirname, '..');
 const profile = path.join(ROOT, '.pw-profile');
 const PORT = 9333;
-const CHROME = '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
 
 if (!fs.existsSync(CHROME)) { console.error(`找不到 Chrome：${CHROME}`); process.exit(1); }
 
-function pids() {
-  try {
-    return execSync(`pgrep -f "user-data-dir=${profile}" || true`, { encoding: 'utf8' })
-      .split('\n').map((s) => s.trim()).filter(Boolean);
-  } catch { return []; }
-}
-function killChrome() {
-  for (const sig of ['SIGTERM', 'SIGKILL']) {
-    if (pids().length === 0) return;
-    for (const p of pids()) { try { process.kill(Number(p), sig); } catch {} }
-    const deadline = Date.now() + 4000;
-    while (Date.now() < deadline && pids().length > 0) { try { execSync('sleep 0.2'); } catch {} }
-  }
-}
 killChrome();
 
 const chrome = spawn(CHROME, [

@@ -10,21 +10,34 @@
 //   2. 跑任一 verify 腳本會啟動 Chrome；在 chrome://extensions 開「開發人員模式」→
 //      「載入未封裝」→ 選 .output/chrome-mv3 → 再點擴充圖示「啟用本地翻譯」下載語言包。
 import { chromium } from 'playwright';
-import { spawn, execSync } from 'node:child_process';
+import { spawn, execFileSync } from 'node:child_process';
 import path from 'node:path';
 import fs from 'node:fs';
 
 export const ROOT = path.resolve(import.meta.dirname, '..');
 const EXT_DIR = path.join(ROOT, '.output/chrome-mv3');
 const PROFILE = path.join(ROOT, '.pw-profile');
-const CHROME = '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
+// 裝在非預設位置（例如 Windows 的使用者層級安裝）就用 CHROME_PATH 覆寫。
+export const CHROME = process.env.CHROME_PATH || {
+  darwin: '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
+  win32: 'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe',
+}[process.platform] || '/usr/bin/google-chrome';
 const PORT = 9333;
 
-function profileChromePids() {
+/** 同步睡一下；不靠 `sleep` 指令，Windows 沒有。 */
+const sleepSync = (ms) => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+
+/** 命令列含 user-data-dir=<.pw-profile> 的行程。Windows 沒有 pgrep，改問 CIM。 */
+export function profileChromePids() {
   try {
-    return execSync(`pgrep -f "user-data-dir=${PROFILE}" || true`, { encoding: 'utf8' })
-      .split('\n').map((s) => s.trim()).filter(Boolean);
-  } catch { return []; }
+    const out = process.platform === 'win32'
+      ? execFileSync('powershell', ['-NoProfile', '-Command',
+          `Get-CimInstance Win32_Process -Filter "Name='chrome.exe'" | ` +
+          `Where-Object { $_.CommandLine -like '*user-data-dir=${PROFILE}*' } | ` +
+          `ForEach-Object { $_.ProcessId }`], { encoding: 'utf8' })
+      : execFileSync('pgrep', ['-f', `user-data-dir=${PROFILE}`], { encoding: 'utf8' });
+    return out.split('\n').map((s) => s.trim()).filter(Boolean);
+  } catch { return []; } // pgrep 找不到時 exit 1，也走這裡
 }
 
 /**
@@ -32,14 +45,14 @@ function profileChromePids() {
  * 新的 Chrome 只會把網址轉交給舊實例然後自己退出，於是我們其實是在測
  * 「舊實例載入的舊擴充產物」——rebuild 完全不會生效，而且無聲無息。
  */
-function killProfileChrome() {
+export function killProfileChrome() {
   for (const sig of ['SIGTERM', 'SIGKILL']) {
     const pids = profileChromePids();
     if (pids.length === 0) return;
     for (const pid of pids) { try { process.kill(Number(pid), sig); } catch {} }
     const deadline = Date.now() + (sig === 'SIGTERM' ? 5000 : 3000);
     while (Date.now() < deadline && profileChromePids().length > 0) {
-      try { execSync('sleep 0.2'); } catch {}
+      sleepSync(200);
     }
   }
 }
@@ -66,7 +79,7 @@ export function findExtensionId() {
   if (!fs.existsSync(prefs)) return null;
   const settings = JSON.parse(fs.readFileSync(prefs, 'utf8'))?.extensions?.settings ?? {};
   for (const [id, v] of Object.entries(settings)) {
-    if (v?.path === EXT_DIR) return id;
+    if (v?.path && path.relative(v.path, EXT_DIR) === '') return id; // Windows 路徑不分大小寫
   }
   return null;
 }

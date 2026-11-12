@@ -19,9 +19,10 @@
 //
 // 前置：npm run build:test，且 .pw-profile 已裝好擴充與語言包（見 verify.mjs 檔頭）。
 import { chromium } from 'playwright';
-import { spawn, execSync } from 'node:child_process';
+import { spawn } from 'node:child_process';
 import path from 'node:path';
 import fs from 'node:fs';
+import { CHROME, profileChromePids, killProfileChrome } from './chrome.mjs';
 
 const ROOT = path.resolve(import.meta.dirname, '..');
 const OUT = path.join(ROOT, 'store/assets');
@@ -29,7 +30,6 @@ const TMP = path.join(ROOT, 'store/assets/.raw'); // 未合成的原始截圖，
 const ext = path.join(ROOT, '.output/chrome-mv3');
 const profile = path.join(ROOT, '.pw-profile');
 const PORT = 9334; // 與 verify.mjs 的 9333 錯開，兩者可並存不打架
-const CHROME = '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
 
 const onlyArg = process.argv.find((a) => a.startsWith('--only='))?.split('=')[1];
 const doShots = onlyArg !== 'promos';
@@ -48,23 +48,6 @@ fs.mkdirSync(OUT, { recursive: true });
 fs.mkdirSync(TMP, { recursive: true });
 
 // ── 清掉佔用同 profile 的舊 Chrome（理由同 verify.mjs：不清就會測到舊擴充產物）──
-function profileChromePids() {
-  try {
-    return execSync(`pgrep -f "user-data-dir=${profile}" || true`, { encoding: 'utf8' })
-      .split('\n').map((s) => s.trim()).filter(Boolean);
-  } catch { return []; }
-}
-function killProfileChrome() {
-  for (const sig of ['SIGTERM', 'SIGKILL']) {
-    const pids = profileChromePids();
-    if (pids.length === 0) return;
-    for (const pid of pids) { try { process.kill(Number(pid), sig); } catch {} }
-    const deadline = Date.now() + (sig === 'SIGTERM' ? 5000 : 3000);
-    while (Date.now() < deadline && profileChromePids().length > 0) {
-      try { execSync('sleep 0.2'); } catch {}
-    }
-  }
-}
 const stale = profileChromePids();
 if (stale.length > 0) { console.log(`清掉 ${stale.length} 個佔用 .pw-profile 的舊 Chrome 行程…`); killProfileChrome(); }
 

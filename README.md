@@ -121,6 +121,14 @@ repo 要公開，profile 裡少一份登入 cookie 就少一個要保護的祕�
 
 所有已實測的環境事實記在 `CLAUDE.md`。
 
+### Windows 開發環境
+
+- Node 與 macOS 開發機同版（目前 v26.7.0），裝完用 `npm ci` 依鎖定檔安裝。
+- Chrome 預設找 `C:\Program Files\Google\Chrome\Application\chrome.exe`；
+  裝在別處（例如使用者層級安裝）就設 `CHROME_PATH` 指到 `chrome.exe`。
+- `.pw-profile` 不進版本庫，換機器要照上面的一次性設定重新載入擴充、下載語言包。
+- 換行字元由 `.gitattributes` 統一為 LF，不必另設 `core.autocrlf`。
+
 ### 結構
 
 ```

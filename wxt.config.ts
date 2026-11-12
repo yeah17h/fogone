@@ -4,8 +4,11 @@ export default defineConfig({
   modules: ['@wxt-dev/module-react'],
   vite: () => ({
     define: {
-      // 測試建置旗標：npm run build:test 會開啟開發觸發器（見 content.ts）
-      __YI_TESTING__: JSON.stringify(process.env.YI_TESTING === '1'),
+      // 測試建置旗標：npm run build:test 會開啟開發觸發器（見 content.ts）。
+      // 認 npm 的腳本名而不是 `YI_TESTING=1 wxt build`：那種環境變數語法 Windows cmd 跑不起來。
+      // 也不用 `--mode test`：非 production mode 會換成 React 開發版 runtime 並改輸出目錄，
+      // 測試產物就不再是正式版的同一份程式碼。
+      __YI_TESTING__: JSON.stringify(process.env.npm_lifecycle_event === 'build:test'),
     },
   }),
   manifest: {
