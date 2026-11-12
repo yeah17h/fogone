@@ -4,7 +4,7 @@ node_modules/
 .pw-profile/
 reports/
 .DS_Store
-.claude/settings.local.json
+.claude/
 store/assets/.raw/
 public/pdfjs/
 .pdf-fixtures/
