@@ -7,7 +7,7 @@ Chrome 擴充（WXT + TypeScript + React）。預設用 Chrome 內建 Translator
 - 產品名：**幾個譯思 Fogone**。
 - `Fogone` = fog + gone，共用一個 g 的縮合字，**官方唸法 fog-gone**。
 - 中文名承擔主市場溝通（「幾個意思」的雙關），英文名承擔 repo／網域／國際場合。
-- **內部識別字一律不改**：`<x-yi>` 元素名、`yi:` 訊息前綴、`.pw-profile`、本機資料夾名。
+- **內部識別字一律不改**：`<x-yi>` 元素名、`yi:` 訊息前綴、`.pw-profile`。
   理由：這些使用者完全看不到，改動只會製造 churn（要同步改測試、驗證腳本、
   已裝在 profile 裡的擴充），沒有任何對應價值。對外識別與內部識別字本來就不必一致。
 
