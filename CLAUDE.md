@@ -163,3 +163,13 @@ Chrome 擴充（WXT + TypeScript + React）。預設用 Chrome 內建 Translator
   這些不是實作細節，是這個專案用來證明自己沒說謊的裝置——砍掉它們，
   省下的行數會從「可驗證性」裡扣。
   若 ponytail 的判斷與本檔或當批指令衝突，**停下回報，不要自行取捨。**
+
+## 交接協定
+- 位置：`../fogone-docs/handoff/`（repo 外、私有；資料夾不存在就建立），含 `report.md`、`next.md`、`archive/`。
+- **每批工作結束時**：回報寫進 `handoff/report.md`（覆蓋），第一行標 `report #N`
+  （N = `archive/report-*.md` 最大序號 +1，沒有任何 report 時 N = 1），並複製一份到 `archive/report-NNN.md`（三位數補零）。
+  格式固定，依序六節：狀態（一句話）、commit 清單、驗證數據表、發現的問題、需要裁決的事項、建議下一步。
+  對話裡只回一句「已寫入 report #N」。
+- **使用者說「讀交接」時**：讀 `handoff/next.md`，核對開頭的「回應 report #N」是否等於最新回報序號；
+  不符就停下回報，相符才執行，執行前把 `next.md` 移到 `archive/next-NNN.md`（NNN 用它回應的 report 序號）。
+- 交接檔**永遠不進 repo**，commit message 也不引用其內容。
