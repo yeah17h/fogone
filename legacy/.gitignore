@@ -1,0 +1,11 @@
+node_modules/
+.output/
+.wxt/
+.pw-profile/
+reports/
+.DS_Store
+.claude/
+store/assets/.raw/
+public/pdfjs/
+.pdf-fixtures/
+docs/product/

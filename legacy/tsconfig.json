@@ -1,0 +1,10 @@
+{
+  "extends": "./.wxt/tsconfig.json",
+  "compilerOptions": {
+    "jsx": "react-jsx",
+    "strict": true,
+    // scripts/*.ts 由 Node 直接執行（Node 26 原生剝除型別），Node 的 ESM 解析
+    // 要求副檔名寫全，所以那些 import 會帶 .ts。noEmit 之下開這個旗標沒有副作用。
+    "allowImportingTsExtensions": true
+  }
+}
